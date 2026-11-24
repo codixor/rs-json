@@ -52,6 +52,13 @@ pub struct Document<'a> {
 impl<'a> Document<'a> {
     pub(crate) fn from_str(src: &'a str) -> Result<Self, Error> {
         if src.len() <= small::INLINE_BYTES {
+            #[cfg(all(feature = "simd", target_pointer_width = "64"))]
+            if let Some(tape) = small::Inline::string_object(src.as_bytes()) {
+                return Ok(Self {
+                    src: src.as_bytes(),
+                    tape: OwnedTape::Inline(tape),
+                });
+            }
             let mut tape = small::Inline::new();
             if small::build(src, Limits::default().max_depth, &mut tape).is_some() {
                 return Ok(Self {
@@ -281,6 +288,61 @@ mod tests {
         match reference {
             Ok(doc) => assert_tape(parser.parse(input).unwrap().tape, &doc),
             Err(err) => assert_eq!(parser.parse(input).unwrap_err(), err),
+        }
+    }
+
+    #[test]
+    fn inline_string_objects_match_the_byte_parser() {
+        let mut parser = Parser::new();
+        let seeds = [
+            r#"{"k":"\uD800\uDC00\nZ","":"a\\b"}"#,
+            r#"{"\\":"日\u00e9","a\"b":"\/\b\f\n\r\t"}"#,
+            r#"{"long":"abcdefghijklmnop\\","two":""}"#,
+            r#"{"":"a relatively long, plain: string"}"#,
+        ];
+        for seed in seeds {
+            #[cfg(all(feature = "simd", target_pointer_width = "64"))]
+            assert!(
+                super::small::Inline::string_object(seed.as_bytes()).is_some(),
+                "{seed}"
+            );
+            compare(&mut parser, seed);
+            // Includes damaged delimiters, escapes, hex digits, surrogates,
+            // controls and a closing quote immediately after a backslash.
+            for offset in 0..seed.len() {
+                let mut input = seed.as_bytes().to_vec();
+                for byte in 0..=127 {
+                    *input.get_mut(offset).expect("offset within seed") = byte;
+                    if let Ok(src) = core::str::from_utf8(&input) {
+                        compare(&mut parser, src);
+                    }
+                }
+            }
+        }
+        #[cfg(all(feature = "simd", target_pointer_width = "64"))]
+        for body_len in [15, 16, 17, 31, 32, 33, 47, 48, 49, 63, 64, 65] {
+            let text = "x".repeat(body_len - 1);
+            let src = format!(r#"{{"key":"{text}"}}"#);
+            assert_eq!(
+                super::small::Inline::string_object(src.as_bytes()).is_some(),
+                (16..=64).contains(&body_len)
+            );
+            compare(&mut parser, &src);
+        }
+        for pad in 0..70 {
+            let prefix = "x".repeat(pad);
+            for tail in [
+                r"\\",
+                r#"\\\""#,
+                r"\uDBFF\uDFFF",
+                r"\udfff",
+                r"\u123",
+                "\\",
+                "\x1f",
+            ] {
+                compare(&mut parser, &format!(r#"{{"x":"{prefix}{tail}","y":""}}"#));
+                compare(&mut parser, &format!(r#"{{"x":"","y":"{prefix}{tail}"}}"#));
+            }
         }
     }
 

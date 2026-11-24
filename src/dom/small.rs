@@ -2,6 +2,9 @@
 //! While a container is open, its end-index field points to its parent.
 //! Closing it replaces that link with the final subtree end.
 
+#[cfg(all(feature = "simd", target_pointer_width = "64"))]
+mod string_object;
+
 use super::{Node, NodeTag};
 use alloc::vec::Vec;
 
