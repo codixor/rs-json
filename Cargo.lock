@@ -783,6 +783,17 @@ dependencies = [
 
 [[package]]
 name = "rs-json"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "076bf3544b48dfd54dceb6cf5550f6dffa783236bd676798258549b945d12c38"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "rs-json"
 version = "0.2.0"
 dependencies = [
  "bufjson",
@@ -791,11 +802,13 @@ dependencies = [
  "memmap2",
  "pretty_assertions",
  "proptest",
+ "rs-json 0.1.0",
  "serde",
  "serde_json",
  "simd-json",
  "simdutf8",
  "sonic-rs",
+ "stats_alloc",
  "thiserror",
  "tokio",
  "wide",
@@ -968,6 +981,12 @@ checksum = "f99e664ecd2d85a68c87e3c7a3cfe691f647ea9e835de984aba4d54a41f817d4"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "syn"
