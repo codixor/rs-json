@@ -1,35 +1,36 @@
 [package]
 name = "rs-json"
-description = "Lightweight zero-copy JSON parser for the rust-misc workspace"
+description = "Zero-copy JSON parser with Serde helpers and JSON-LD builders"
 readme = "README.md"
-repository = "https://github.com/mwdghaz/rust-misc"
+include = ["src/**", "tests/**", "examples/**", "benches/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE-*"]
+repository = "https://github.com/codixor/rs-json"
 keywords = ["json", "parser", "zero-copy", "dom"]
 categories = ["parsing", "encoding"]
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-version.workspace = true
+edition = "2024"
+rust-version = "1.95.0"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
 
 [lib]
 name = "rs_json"
 
 [dependencies]
-serde = { workspace = true, features = ["std"] }
-serde_json = { workspace = true, features = ["std"] }
-thiserror.workspace = true
+serde = { version = "1.0.228", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.149", default-features = false, features = ["std"] }
+thiserror = "2.0.18"
 
 [dev-dependencies]
-ahash.workspace = true
-criterion.workspace = true
-hashbrown.workspace = true
-indexmap.workspace = true
-legacy_json.workspace = true
-pretty_assertions.workspace = true
-serde = { workspace = true, features = ["std", "derive"] }
+ahash = "0.8.12"
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports", "plotters"] }
+hashbrown = "0.17.0"
+indexmap = "2.14.0"
+legacy_json = { package = "json", version = "0.12.4" }
+pretty_assertions = "1.4.1"
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dev-dependencies]
-simd-json.workspace = true
-sonic-rs.workspace = true
+simd-json = "0.17.0"
+sonic-rs = "0.5.8"
 
 [[bench]]
 name = "json_core"
@@ -43,5 +44,9 @@ harness = false
 name = "json_ld"
 harness = false
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

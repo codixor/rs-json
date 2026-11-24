@@ -1,6 +1,8 @@
 # rs-json
 
-`rs-json` is the workspace’s lightweight zero-copy JSON parser crate.
+A zero-copy JSON parser with Serde helpers and JSON-LD builders. This repository imports the working 0.1.0 crate from `codixor/rust-misc` at `ae68abb54c655a8fcc009123fbc31821b82435e4`. The [0.2 staging branch](https://github.com/codixor/rs-json/tree/staging/0.2-skeleton) contains the proposed redesign.
+
+The 0.1 parser uses recursion and has no nesting-depth limit. For untrusted documents, use a parser that enforces a depth limit before processing them with this API.
 
 The crate is intentionally small:
 - library-first
@@ -184,28 +186,28 @@ Supported Google-oriented builders today:
 Run the examples with:
 
 ```sh
-cargo run -p rs-json@0.1.0 --example parse_object
-cargo run -p rs-json@0.1.0 --example traverse_nested
-cargo run -p rs-json@0.1.0 --example inspect_error
-cargo run -p rs-json@0.1.0 --example json_ld_hand_built
-cargo run -p rs-json@0.1.0 --example json_ld_google_product
-cargo run -p rs-json@0.1.0 --example json_ld_google_organization_policy
-cargo run -p rs-json@0.1.0 --example json_ld_google_breadcrumb
-cargo run -p rs-json@0.1.0 --example json_ld_google_news
-cargo run -p rs-json@0.1.0 --example json_ld_google_job
-cargo run -p rs-json@0.1.0 --example json_ld_google_event
-cargo run -p rs-json@0.1.0 --example json_ld_google_local_business
-cargo run -p rs-json@0.1.0 --example json_ld_google_video
-cargo run -p rs-json@0.1.0 --example json_ld_google_forum_qa
-cargo run -p rs-json@0.1.0 --example json_ld_google_education
-cargo run -p rs-json@0.1.0 --example json_ld_google_profile_software
-cargo run -p rs-json@0.1.0 --example json_ld_google_dataset_travel
+cargo run --example parse_object
+cargo run --example traverse_nested
+cargo run --example inspect_error
+cargo run --example json_ld_hand_built
+cargo run --example json_ld_google_product
+cargo run --example json_ld_google_organization_policy
+cargo run --example json_ld_google_breadcrumb
+cargo run --example json_ld_google_news
+cargo run --example json_ld_google_job
+cargo run --example json_ld_google_event
+cargo run --example json_ld_google_local_business
+cargo run --example json_ld_google_video
+cargo run --example json_ld_google_forum_qa
+cargo run --example json_ld_google_education
+cargo run --example json_ld_google_profile_software
+cargo run --example json_ld_google_dataset_travel
 ```
 
 ## Validation
 
 ```sh
-bash rs-json/scripts/validate.sh
+bash scripts/validate.sh
 ```
 
 That covers:
@@ -218,8 +220,8 @@ That covers:
 ## Benchmarks
 
 ```sh
-bash rs-json/scripts/bench.sh
-bash rs-json/scripts/bench-json-ld.sh
+bash scripts/bench.sh
+bash scripts/bench-json-ld.sh
 ```
 
 The current Criterion surface covers:
@@ -267,3 +269,7 @@ Future interop work with `kdl` now follows a measured rule:
   KDL `Document`
 
 That keeps JSON parsing performance work independent from format-conversion policy and avoids forcing JSON through KDL-shaped structure when the shared model is enough.
+
+## Releases
+
+Pushes to `main` run checks. A pushed `v<version>` tag matching `Cargo.toml` runs the checks, publishes through the GitHub `cratesio` environment and creates the GitHub release for that tag.
