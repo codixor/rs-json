@@ -1,5 +1,8 @@
 # 0.2 slice parser measurements
 
+The [corpus benchmarks](#corpus-benchmarks-on-arbi-pc) compare seven operations on
+four in-memory documents in default and native Ryzen builds.
+
 The first implementation of the nesting limit enables the two `rs-json` lanes
 in `parse_small`. These measurements establish a baseline for the development
 branch. The staged skeleton had no working DOM parser to time.
@@ -293,3 +296,126 @@ sequence also recorded zero heap operations.
 To repeat the fixed-input lanes, use the `small/<fixture>/<lane>` exact-filter command
 above. Compare a checkout of `b154383` with `dace0a1` using separate Criterion output
 directories and repeat the rotating controls with the same build settings.
+
+## Corpus benchmarks on arbi-pc
+
+These measurements use the parser at `ebc613f`, the merge of PR #4 into
+`staging/0.2-skeleton`, with the corpus harness from `7dab6eb`. Each timed iteration
+consumes one complete in-memory document.
+Time is the Criterion mean in nanoseconds per document. Throughput is decimal MB/s,
+calculated from the exact file length and the unrounded time.
+
+| Document | Operation | Default ns/doc | Default MB/s | Native ns/doc | Native MB/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `twitter.json` | rs-json 0.2 one-shot | 1,705,152 | 370.4 | 1,886,341 | 334.8 |
+|  | rs-json 0.2 reused | 1,909,103 | 330.8 | 1,712,278 | 368.8 |
+|  | rs-json at `ae68abb` | 2,215,032 | 285.1 | 2,490,542 | 253.6 |
+|  | serde_json DOM | 4,107,787 | 153.7 | 4,059,626 | 155.6 |
+|  | sonic-rs DOM | 1,052,085 | 600.2 | 689,597 | 915.8 |
+|  | simd-json borrowed DOM | 3,151,419 | 200.4 | 3,166,924 | 199.4 |
+|  | bufjson validation | 1,842,535 | 342.7 | 1,817,112 | 347.5 |
+| `citm_catalog.json` | rs-json 0.2 one-shot | 5,157,679 | 334.9 | 4,623,733 | 373.6 |
+|  | rs-json 0.2 reused | 4,733,954 | 364.9 | 4,493,282 | 384.4 |
+|  | rs-json at `ae68abb` | 4,544,173 | 380.1 | 4,064,024 | 425.0 |
+|  | serde_json DOM | 8,411,578 | 205.3 | 7,172,111 | 240.8 |
+|  | sonic-rs DOM | 2,899,158 | 595.8 | 1,522,206 | 1134.7 |
+|  | simd-json borrowed DOM | 9,366,849 | 184.4 | 9,297,035 | 185.8 |
+|  | bufjson validation | 4,699,375 | 367.5 | 4,618,557 | 374.0 |
+| `canada.json` | rs-json 0.2 one-shot | 9,487,787 | 237.3 | 9,400,328 | 239.5 |
+|  | rs-json 0.2 reused | 9,713,786 | 231.7 | 9,664,292 | 232.9 |
+|  | rs-json at `ae68abb` | 17,015,817 | 132.3 | 17,508,476 | 128.6 |
+|  | serde_json DOM | 26,426,695 | 85.2 | 26,810,720 | 84.0 |
+|  | sonic-rs DOM | 5,822,630 | 386.6 | 5,541,689 | 406.2 |
+|  | simd-json borrowed DOM | 23,277,129 | 96.7 | 21,864,355 | 103.0 |
+|  | bufjson validation | 6,361,999 | 353.8 | 6,102,862 | 368.9 |
+| `gen_mixed_16mb.json` | rs-json 0.2 one-shot | 136,631,013 | 123.0 | 134,711,638 | 124.7 |
+|  | rs-json 0.2 reused | 111,140,006 | 151.2 | 107,933,490 | 155.7 |
+|  | rs-json at `ae68abb` | 176,412,068 | 95.3 | 176,668,851 | 95.1 |
+|  | serde_json DOM | 273,451,544 | 61.5 | 263,125,433 | 63.9 |
+|  | sonic-rs DOM | 88,852,544 | 189.1 | 85,038,562 | 197.6 |
+|  | simd-json borrowed DOM | 253,811,782 | 66.2 | 250,521,475 | 67.1 |
+|  | bufjson validation | 88,954,721 | 188.9 | 84,830,864 | 198.1 |
+
+### Comparison with the historical parser and sonic-rs
+
+The old-parser speedup divides historical one-shot time by current one-shot time.
+The sonic-rs ratio divides current one-shot time by sonic-rs DOM time. The S4 DOM
+target is at most 1.30× sonic-rs latency on Twitter and CITM. The one-shot point estimates
+exceeded that target on both fixtures in both builds.
+
+| Document | Speedup vs old, default | Speedup vs old, native | Time / sonic-rs, default | Time / sonic-rs, native |
+| --- | ---: | ---: | ---: | ---: |
+| `twitter.json` | 1.30× | 1.32× | 1.62× | 2.74× |
+| `citm_catalog.json` | 0.88× | 0.88× | 1.78× | 3.04× |
+| `canada.json` | 1.79× | 1.86× | 1.63× | 1.70× |
+| `gen_mixed_16mb.json` | 1.29× | 1.31× | 1.54× | 1.58× |
+
+One-shot 0.2 had a lower mean time than the historical parser on three documents in
+both builds. CITM was the exception at 0.88×. Under this CPU quota its individual
+95% bootstrap intervals overlapped. In milliseconds, the default intervals were
+4.32–6.38 for 0.2 and 3.85–5.54 for the historical parser. The native intervals
+were 4.10–5.20 and 3.70–4.37, respectively.
+
+The one-shot DOM lanes include construction and destruction of an owned or borrowed DOM.
+Reusing `rs_json::Parser` retains its tape between parses. The simd-json lane
+prepares one fresh mutable input buffer per iteration outside the timer and drops
+the parsed DOM inside it. The bufjson lane validates through EOF without building
+a DOM. File I/O is outside all timings.
+
+### Inputs and reproduction
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `twitter.json` | 631,514 | `a08b769f32b95f426cbc3abafcec65c1a19d3eb544d4ddf320eae142c99efc5d` |
+| `citm_catalog.json` | 1,727,204 | `a73e7a883f6ea8de113dff59702975e60119b4b58d451d518a929f31c92e2059` |
+| `canada.json` | 2,251,051 | `f83b3b354030d5dd58740c68ac4fecef64cb730a0d12a90362a7f23077f50d78` |
+| `gen_mixed_16mb.json` | 16,804,466 | `54245962ae96aecb9de6f3360d58b595178e6173fa3b55f1e6174a05ce2384bd` |
+
+The three public documents come from [nativejson-benchmark at `478d572`](https://github.com/miloyip/nativejson-benchmark/tree/478d5727c2a4048e835a29c65adecc7d795360d5/data).
+The mixed array comes from `examples/gen_corpus.rs` at the measured merge.
+The historical lane compiled the Git sources of `rust-misc/rs-json` at
+`ae68abb54c655a8fcc009123fbc31821b82435e4` through a temporary path dependency.
+All 32 files in its `src` tree (`c6cf481d22b3ab50ef6835605865ed4b1a4e0375`)
+matched the public 0.1.0 package byte for byte. The checked-in harness uses that
+package. The other versions and checksums matched the staging lockfile, including
+Criterion 0.8.2, serde_json 1.0.154, sonic-rs 0.5.12, simd-json 0.19.0 and
+bufjson 1.3.0.
+
+The host was an AMD Ryzen 9 9950X3D2 under WSL2 Linux `6.18.58.1-microsoft-standard-WSL2`, with Rust
+1.100.0. Default used no `RUSTFLAGS`. Native used `-C target-cpu=native`.
+Both used CPU 21, nice 15, a quota of 25 ms per 100 ms, a 1 GiB memory limit
+and one build job. The guard required three consecutive readings below 35% Windows
+and WSL CPU and below 7.7 guest one-minute load. An interrupted lane restarts
+from warmup. These wall-clock rates include scheduling under the quota.
+
+For comparable wall-clock timings, run from the repository root on the benchmark
+host inside the CPU quota and load guard described above.
+
+```sh
+set -eu
+export CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0
+mkdir -p data
+base=https://raw.githubusercontent.com/miloyip/nativejson-benchmark/478d5727c2a4048e835a29c65adecc7d795360d5/data
+for f in twitter.json citm_catalog.json canada.json; do
+    curl -fsSL "$base/$f" -o "data/$f"
+done
+cargo run --locked --profile bench --example gen_corpus -- data/gen_mixed_16mb.json mixed 16
+for mode in default native; do
+    if [ "$mode" = native ]; then export RUSTFLAGS='-C target-cpu=native'; else unset RUSTFLAGS; fi
+    export CRITERION_HOME="$PWD/target/corpus-$mode"
+    for f in twitter.json citm_catalog.json canada.json gen_mixed_16mb.json; do
+        for lane in rs_json::parse 'rs_json::Parser(reuse)' rs_json_010::parse serde_json::Value sonic_rs::Value simd_json::borrowed bufjson::validate; do
+            cargo bench --locked --bench parse_corpus -- "corpus/$f/$lane" --exact \
+                --warm-up-time 1 --measurement-time 8 --nresamples 10000 --noplot
+        done
+    done
+done
+```
+
+A smoke run parsed or validated every fixture with every lane before timing. Each
+build produced all 28 expected measurements, with 30 samples per lane.
+
+On the benchmark host, the checked-in dependency configuration passed
+`cargo fmt --all --check`, strict Clippy across all features and targets,
+tests with all features and with default features disabled, and
+`cargo check --locked --benches --all-features`.
