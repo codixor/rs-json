@@ -234,6 +234,11 @@ impl<L: Lexer> PullParser<L> {
             .inspect_err(|&error| self.error = Some(error))
     }
 
+    /// Recover the lexer, including any buffered input it owns.
+    pub fn into_inner(self) -> L {
+        self.lexer
+    }
+
     /// Raw bytes of the last key, string or number event.
     pub fn content(&self) -> &[u8] {
         self.lexer.content()
@@ -258,5 +263,25 @@ impl<L: Lexer> PullParser<L> {
                 pos: self.lexer.position(self.lexer.span().start),
             }),
         }
+    }
+}
+
+#[cfg(feature = "read")]
+impl<R: std::io::Read> PullParser<crate::lex::read::ReadLexer<R>> {
+    /// Parse a synchronous reader. The lexer and grammar share the supplied limits.
+    ///
+    /// ```
+    /// use rs_json::{Limits, config::BufConfig, stream::{Event, PullParser}};
+    /// let mut p = PullParser::from_reader(&b"[null]"[..], BufConfig::default(), Limits::default());
+    /// p.skip_value()?;
+    /// assert_eq!(p.next_event()?, Event::End);
+    /// assert_eq!(p.next_event()?, Event::Eof);
+    /// # Ok::<(), rs_json::Error>(())
+    /// ```
+    pub fn from_reader(reader: R, cfg: crate::config::BufConfig, limits: Limits) -> Self {
+        Self::new(
+            crate::lex::read::ReadLexer::new(reader, cfg, limits),
+            limits,
+        )
     }
 }

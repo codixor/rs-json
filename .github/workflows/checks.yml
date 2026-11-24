@@ -16,6 +16,18 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - run: cargo test --locked --all-features
+      - name: Check out the pinned JSON conformance cases
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nst/JSONTestSuite
+          ref: 1ef36fa01286573e846ac449e8683f8833c5b26a
+          path: target/json-testsuite
+          sparse-checkout: test_parsing
+          persist-credentials: false
+      - name: Compare all reader buffer sizes against the slice parser
+        run: cargo test --locked --all-features --test conformance -- --ignored
+        env:
+          RS_JSON_CONFORMANCE_DIR: target/json-testsuite/test_parsing
       - run: cargo test --locked --no-default-features
       - run: cargo test --locked --examples
       - run: cargo check --locked --benches

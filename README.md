@@ -2,8 +2,8 @@
 
 The slice parser builds a flat tape with 16-byte nodes. `parse` accepts a string,
 `parse_bytes` accepts UTF-8 bytes, and `Parser::parse` reuses its buffers across
-documents. A slice-backed `PullParser` exposes the same grammar as a stream of
-events. The published 0.1 API is on [main](https://github.com/codixor/rs-json/tree/main).
+documents. `PullParser` exposes the same grammar for byte slices and synchronous
+readers. The published 0.1 API is on [main](https://github.com/codixor/rs-json/tree/main).
 
 ### Nesting limit
 
@@ -23,8 +23,32 @@ assert_eq!(error.kind, ErrorKind::DepthLimit);
 assert_eq!(error.offset(), 1);
 ```
 
+### Parsing a reader
+
+Enable the `read` feature to use `PullParser::from_reader` with a `std::io::Read`
+source. The parser borrows token bytes from its refill buffer and retains a
+token that spans multiple reads. `Limits::max_token_bytes` bounds the raw
+string body or number in bytes. Both limits also apply to skipped values.
+Use `multi_document(true)` for successive JSON documents.
+
+```rust
+use rs_json::{Limits, config::BufConfig, stream::{Event, PullParser}};
+
+fn main() -> Result<(), rs_json::Error> {
+    let input = &b"{\"page\":1} {\"page\":2}"[..];
+    let mut parser = PullParser::from_reader(input, BufConfig::default(), Limits::default())
+        .multi_document(true);
+    for _ in 0..2 {
+        parser.skip_value()?;
+        assert_eq!(parser.next_event()?, Event::End);
+    }
+    assert_eq!(parser.next_event()?, Event::Eof);
+    Ok(())
+}
+```
+
 The following features and performance targets are described in the
-[0.2 roadmap](docs/PLAN.md). Buffered reader parsing, file mapping and
+[0.2 roadmap](docs/PLAN.md). File mapping and
 the higher-level compatibility features are still in development.
 
 | Feature | Default | Adds |
