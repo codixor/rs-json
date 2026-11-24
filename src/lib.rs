@@ -1,6 +1,6 @@
 //! `rs-json` — zero-copy JSON for every input size.
 //!
-//! Three layers share one lexer core:
+//! Parsing entry points:
 //!
 //! | Layer | Entry point | Use when |
 //! |-------|-------------|----------|
@@ -45,18 +45,14 @@ pub use crate::error::{Error, ErrorKind, Pos};
 
 /// Parse a complete JSON text into a borrowed tape [`Document`].
 ///
-/// One-shot convenience; allocates a fresh tape. For repeated small
+/// The returned document owns its tape. Short tapes can fit inline. For repeated small
 /// documents keep a [`Parser`] and call [`Parser::parse`] so the tape and
 /// stack allocations are reused (zero allocations after warm-up).
 ///
 /// # Errors
 /// Returns [`Error`] for invalid JSON or when a [`Limits`] bound is exceeded.
 pub fn parse(src: &str) -> Result<Document<'_>, Error> {
-    Document::from_lexer(
-        src.as_bytes(),
-        Limits::default(),
-        lex::slice::SliceLexer::from_str(src),
-    )
+    Document::from_str(src)
 }
 
 /// Parse UTF-8 bytes. String contents are UTF-8 validated with `simdutf8`

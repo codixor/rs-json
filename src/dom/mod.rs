@@ -2,11 +2,13 @@
 //!
 //! The old crate built one `JsonItem` (56 bytes) per value plus one heap
 //! `Vec` per container, recursively. The tape stores every value as a
-//! 16-byte [`Node`] in a single `Vec`, in document order, and containers
+//! 16-byte [`Node`] in document order on the main tape, and containers
 //! record the index one past their last descendant, so skipping a subtree
-//! is O(1) and the whole parse does one growable allocation (zero when a
-//! [`Parser`] is reused).
+//! is O(1). A small owned document can carry its nodes inline. A reusable
+//! [`Parser`] retains the tape and its layout between calls.
 
+mod layout;
+mod small;
 mod tape;
 mod value;
 
@@ -20,14 +22,56 @@ use crate::lex::{Lexer, slice::SliceLexer};
 use crate::stream::{Event, Grammar};
 use alloc::vec::Vec;
 
+#[derive(Debug)]
+enum OwnedTape {
+    Inline(small::Inline),
+    Heap(Vec<Node>),
+}
+impl OwnedTape {
+    fn len(&self) -> usize {
+        match self {
+            Self::Inline(t) => t.len(),
+            Self::Heap(t) => t.len(),
+        }
+    }
+    fn get(&self, i: usize) -> Option<Node> {
+        match self {
+            Self::Inline(t) => t.get(i),
+            Self::Heap(t) => t.get(i).copied(),
+        }
+    }
+}
+
 /// Parsed document borrowing the source text.
 #[derive(Debug)]
 pub struct Document<'a> {
     pub(crate) src: &'a [u8],
-    pub(crate) tape: Vec<Node>,
+    tape: OwnedTape,
 }
 
 impl<'a> Document<'a> {
+    pub(crate) fn from_str(src: &'a str) -> Result<Self, Error> {
+        if src.len() <= small::INLINE_BYTES {
+            let mut tape = small::Inline::new();
+            if small::build(src, Limits::default().max_depth, &mut tape).is_some() {
+                return Ok(Self {
+                    src: src.as_bytes(),
+                    tape: OwnedTape::Inline(tape),
+                });
+            }
+        }
+        if src.len() <= small::MAX_BYTES {
+            let mut tape = Vec::with_capacity((src.len() / 4 + 1).min(64));
+            if small::build(src, Limits::default().max_depth, &mut tape).is_some() {
+                return Ok(Self {
+                    src: src.as_bytes(),
+                    tape: OwnedTape::Heap(tape),
+                });
+            }
+        }
+        Self::from_lexer(src.as_bytes(), Limits::default(), SliceLexer::from_str(src))
+    }
+
     /// Parse with explicit limits. `trusted_utf8` = input came from `&str`.
     ///
     /// # Errors
@@ -50,7 +94,10 @@ impl<'a> Document<'a> {
             &mut Grammar::default(),
             &mut Vec::new(),
         )?;
-        Ok(Self { src, tape })
+        Ok(Self {
+            src,
+            tape: OwnedTape::Heap(tape),
+        })
     }
 
     /// Root value view.
@@ -71,6 +118,7 @@ impl<'a> Document<'a> {
 pub struct Parser {
     tape: Vec<Node>,
     grammar: Grammar,
+    layout: layout::Layout,
     open: Vec<u32>,
     /// Limits applied to every parse.
     pub limits: Limits,
@@ -82,12 +130,34 @@ impl Parser {
         Self::default()
     }
 
-    /// Parse `src`, reusing internal buffers. The returned document borrows
+    /// Parse `src`, reusing internal buffers. For small messages with stable token
+    /// boundaries, every input byte is checked against the previous tape’s layout.
+    /// The returned document borrows
     /// both `src` and `self`.
     ///
     /// # Errors
     /// Invalid JSON or exceeded limits.
     pub fn parse<'p, 'a>(&'p mut self, src: &'a str) -> Result<DocRef<'p, 'a>, Error> {
+        if src.len() as u64 <= self.limits.max_document_bytes
+            && self.layout.accepts(src, self.limits.max_depth)
+        {
+            return Ok(DocRef {
+                src: src.as_bytes(),
+                tape: &self.tape,
+            });
+        }
+        self.layout.reset();
+        self.tape.clear();
+        if src.len() <= small::MAX_BYTES
+            && src.len() as u64 <= self.limits.max_document_bytes
+            && small::build(src, self.limits.max_depth, &mut self.tape).is_some()
+        {
+            self.layout.remember(src, &self.tape, self.limits.max_depth);
+            return Ok(DocRef {
+                src: src.as_bytes(),
+                tape: &self.tape,
+            });
+        }
         self.tape.clear();
         self.grammar.clear();
         self.open.clear();
@@ -99,6 +169,7 @@ impl Parser {
             &mut self.grammar,
             &mut self.open,
         )?;
+        self.layout.remember(src, &self.tape, self.limits.max_depth);
         Ok(DocRef {
             src: src.as_bytes(),
             tape: &self.tape,
@@ -177,5 +248,123 @@ fn build(
             open.push(index);
         }
         tape.push(node);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Document, Parser};
+    use alloc::format;
+    use alloc::string::String;
+    use proptest::prelude::*;
+
+    fn assert_tape(nodes: &[super::Node], doc: &Document<'_>) {
+        assert_eq!(nodes.len(), doc.node_count());
+        for (i, &node) in nodes.iter().enumerate() {
+            assert_eq!(doc.tape.get(i), Some(node));
+        }
+    }
+    fn compare(parser: &mut Parser, input: &str) {
+        let reference = Document::parse_with(input.as_bytes(), parser.limits, false);
+        if parser.limits == crate::Limits::default() {
+            match (crate::parse(input), &reference) {
+                (Ok(doc), Ok(expected)) => {
+                    assert_eq!(doc.node_count(), expected.node_count());
+                    for i in 0..doc.node_count() {
+                        assert_eq!(doc.tape.get(i), expected.tape.get(i));
+                    }
+                }
+                (Err(err), Err(expected)) => assert_eq!(&err, expected),
+                _ => panic!("owned and byte parsers disagree on {input:?}"),
+            }
+        }
+        match reference {
+            Ok(doc) => assert_tape(parser.parse(input).unwrap().tape, &doc),
+            Err(err) => assert_eq!(parser.parse(input).unwrap_err(), err),
+        }
+    }
+
+    #[test]
+    fn varying_boundaries_and_escapes_match_the_reference_tape() {
+        let mut parser = Parser::new();
+        for len in (0..66).chain(4080..4110) {
+            let pad = "x".repeat(len);
+            for suffix in [r#"\""#, r"\\", r"\ud83d\ude00", "日", "\n", r"\udc00"] {
+                let input = format!(r#"{{"k":"{pad}{suffix}","z":[-0.1e-2,true,{{}}]}}"#);
+                compare(&mut parser, &input);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn edited_documents_match_the_reference(
+            key in ".{0,12}", text in ".{0,48}", n in any::<i32>(),
+            edit in 0..256usize, byte in 0u8..128,
+        ) {
+            let value = serde_json::json!({key: [text, n, false, null, {"v": []}]});
+            let mut parser = Parser::new();
+            for input in [serde_json::to_string(&value).unwrap(), serde_json::to_string_pretty(&value).unwrap()] {
+                compare(&mut parser, &input);
+                let mut damaged = input.into_bytes();
+                let offset = edit % damaged.len();
+                *damaged.get_mut(offset).unwrap() = byte;
+                if let Ok(changed) = String::from_utf8(damaged) {
+                    compare(&mut parser, &changed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_reused_tape_matches_fresh_parsing_for_single_byte_edits() {
+        // Include each UTF-16 surrogate boundary, leading zero, fractions,
+        // signed exponents, syntax whitespace, enum literals and escaped keys.
+        let seeds = [
+            r#"{"a\u0062":["a\"b\\c","x\uD7FF","\ud800\udfff","\uE000",-0.12E+3,19]}"#,
+            " [ true, false, null, \"str\", 0 ] ",
+            r#"{"token":"\udbff\udc00","quote":"\/\t\r\f\n\b"}"#,
+        ];
+        for seed in seeds {
+            let mut parser = Parser::new();
+            parser.parse(seed).unwrap();
+            parser.parse(seed).unwrap();
+            assert!(parser.layout.accepts(seed, parser.limits.max_depth));
+            for i in 0..seed.len() {
+                let mut bytes = seed.as_bytes().to_vec();
+                for b in 0..=127 {
+                    *bytes.get_mut(i).unwrap() = b;
+                    let edit = core::str::from_utf8(&bytes).unwrap();
+                    if parser.layout.accepts(edit, parser.limits.max_depth) {
+                        let doc = Document::parse_with(&bytes, parser.limits, false).unwrap();
+                        assert_tape(&parser.tape, &doc);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fresh_values_errors_and_limit_changes_invalidate_stale_tapes() {
+        let mut parser = Parser::new();
+        let first = r#"{"abc":[12,"\u00e9"]}"#;
+        let changed = r#"{"日本":[34,"\u00e4"]}"#;
+        let same_width = r#"{"日":[34,"\u00e4"]}"#;
+        for s in [
+            first,
+            first,
+            same_width,
+            changed,
+            r#"{"bad":[00,"\u00e4"]}"#,
+            first,
+        ] {
+            compare(&mut parser, s);
+        }
+        parser.parse(first).unwrap();
+        parser.limits.max_depth = 1;
+        compare(&mut parser, first);
+        parser.limits.max_depth = 10;
+        parser.limits.max_document_bytes = 1;
+        compare(&mut parser, first);
     }
 }

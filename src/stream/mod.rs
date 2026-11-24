@@ -1,5 +1,5 @@
-//! Pull events over any [`crate::lex::Lexer`]. The tape builder uses the same
-//! grammar. Storage for open containers grows with the configured nesting limit.
+//! Pull events over any [`crate::lex::Lexer`]. The general tape builder also uses this grammar.
+//! Compact UTF-8 documents have a direct tape writer. Storage for open containers grows with the configured nesting limit.
 
 #[cfg(feature = "pointer")]
 pub mod pointer;
@@ -57,7 +57,7 @@ enum State {
     AfterRoot,
 }
 
-/// The DOM builder and pull parser advance this same grammar one event at a time.
+/// The general DOM builder and the pull parser advance one event at a time.
 #[derive(Debug, Default)]
 pub(crate) struct Grammar {
     stack: NestStack,

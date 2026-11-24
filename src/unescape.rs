@@ -10,20 +10,56 @@ pub(crate) enum EscapeError {
 
 use EscapeError::{Incomplete, Invalid};
 
+// Invalid digits have the high bit set, so all four lanes can be checked together.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "only ASCII hex digits index the 256-entry table"
+)]
+const HEX: [u8; 256] = {
+    let mut table = [0xff; 256];
+    let mut digit = 0u8;
+    while digit < 16 {
+        if digit < 10 {
+            table[(b'0' + digit) as usize] = digit;
+        } else {
+            table[(b'a' + digit - 10) as usize] = digit;
+            table[(b'A' + digit - 10) as usize] = digit;
+        }
+        digit += 1;
+    }
+    table
+};
+
+#[inline]
 fn hex_quad(bytes: &[u8]) -> Result<u16, EscapeError> {
-    let digits = bytes.get(..4).ok_or(Incomplete(ErrorKind::UnexpectedEof))?;
-    digits.iter().try_fold(0u16, |n, &byte| {
-        let digit = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'a'..=b'f' => byte - b'a' + 10,
-            b'A'..=b'F' => byte - b'A' + 10,
-            _ => return Err(Invalid(ErrorKind::InvalidString)),
-        };
-        Ok((n << 4) | u16::from(digit))
-    })
+    let digits = bytes
+        .first_chunk::<4>()
+        .ok_or(Incomplete(ErrorKind::UnexpectedEof))?;
+    let [a, b, c, d] = digits.map(|byte| {
+        *HEX.get(usize::from(byte))
+            .expect("256 entries cover every byte")
+    });
+    if (a | b | c | d) == 0xff {
+        return Err(Invalid(ErrorKind::InvalidString));
+    }
+    Ok(u16::from_be_bytes([(a << 4) | b, (c << 4) | d]))
+}
+
+#[inline]
+pub(crate) fn validated_unicode_len(bytes: &[u8]) -> Option<usize> {
+    let unit = hex_quad(bytes).ok()?;
+    match unit {
+        0xd800..=0xdbff => {
+            let low = bytes.get(4..)?.strip_prefix(b"\\u")?;
+            (hex_quad(low).ok()? & 0xfc00 == 0xdc00).then_some(10)
+        }
+        0xdc00..=0xdfff => None,
+        _ => Some(4),
+    }
 }
 
 /// Decode one escape starting immediately after its backslash.
+#[inline]
 pub(crate) fn escape(bytes: &[u8]) -> Result<(char, usize), ErrorKind> {
     escape_prefix(bytes).map_err(|e| match e {
         Invalid(kind) | Incomplete(kind) => kind,
@@ -31,6 +67,7 @@ pub(crate) fn escape(bytes: &[u8]) -> Result<(char, usize), ErrorKind> {
 }
 
 // A refill can complete a partial escape. At true EOF, report its original error kind.
+#[inline]
 pub(crate) fn escape_prefix(bytes: &[u8]) -> Result<(char, usize), EscapeError> {
     let (&first, tail) = bytes
         .split_first()

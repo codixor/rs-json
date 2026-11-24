@@ -36,7 +36,6 @@ impl<'d, 'a> Value<'d, 'a> {
         self.doc
             .tape
             .get(self.idx as usize)
-            .copied()
             .expect("value indexes a parsed tape node")
     }
 
@@ -167,7 +166,6 @@ impl<'d, 'a> Value<'d, 'a> {
         let n = doc
             .tape
             .get(idx as usize)
-            .copied()
             .expect("iterator visits a parsed tape node");
         match n.tag {
             NodeTag::Arr | NodeTag::Obj => n.c,
