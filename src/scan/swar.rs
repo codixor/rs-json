@@ -3,21 +3,21 @@
 const LO: u64 = 0x0101_0101_0101_0101;
 const HI: u64 = 0x8080_8080_8080_8080;
 
-#[inline(always)]
+#[inline]
 fn load(buf: &[u8], i: usize) -> Option<u64> {
-    let chunk: [u8; 8] = buf.get(i..i + 8)?.try_into().ok()?;
+    let chunk: [u8; 8] = buf.get(i..i.checked_add(8)?)?.try_into().ok()?;
     Some(u64::from_le_bytes(chunk))
 }
 
 /// High bit set in each byte lane that equals `b`.
-#[inline(always)]
+#[inline]
 fn eq_mask(w: u64, b: u8) -> u64 {
     let x = w ^ (LO * u64::from(b));
     x.wrapping_sub(LO) & !x & HI
 }
 
 /// Lanes holding `"`, `\`, `< 0x20` or `>= 0x80`.
-#[inline(always)]
+#[inline]
 fn interesting(w: u64) -> u64 {
     let ctrl = w.wrapping_sub(LO * 0x20) & !w & HI; // < 0x20 (exact when no lane >= 0x80)
     eq_mask(w, b'"') | eq_mask(w, b'\\') | ctrl | (w & HI)
@@ -43,9 +43,14 @@ pub(crate) fn string_run_end(buf: &[u8], mut i: usize) -> usize {
 #[inline]
 pub(crate) fn skip_ws(buf: &[u8], mut i: usize) -> usize {
     while let Some(w) = load(buf, i) {
-        let not_ws = !(eq_mask(w, b' ') | eq_mask(w, b'\t') | eq_mask(w, b'\n') | eq_mask(w, b'\r')) & HI;
-        if not_ws != 0 {
-            return i + (not_ws.trailing_zeros() / 8) as usize;
+        // The subtraction-based equality mask can borrow across byte lanes.
+        // Only skip a whole word when every byte is JSON whitespace.
+        if !w
+            .to_le_bytes()
+            .iter()
+            .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+        {
+            break;
         }
         i += 8;
     }

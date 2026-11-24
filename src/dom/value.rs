@@ -33,7 +33,11 @@ impl<'d, 'a> Value<'d, 'a> {
     }
 
     fn node(&self) -> Node {
-        self.doc.tape[self.idx as usize]
+        self.doc
+            .tape
+            .get(self.idx as usize)
+            .copied()
+            .expect("value indexes a parsed tape node")
     }
 
     /// Kind of this value.
@@ -49,11 +53,42 @@ impl<'d, 'a> Value<'d, 'a> {
     }
 
     /// Raw source text (escapes intact, quotes excluded for strings).
+    ///
+    /// # Panics
+    /// Only if an internal tape invariant is violated. Public constructors validate the tape.
     pub fn raw(&self) -> &'a str {
         let n = self.node();
-        let bytes = self.doc.src.get(n.a as usize..(n.a + n.b) as usize).unwrap_or_default();
-        // Validated during parse; agent: replace with a checked-once invariant.
-        core::str::from_utf8(bytes).unwrap_or_default()
+        let start = n.a as usize;
+        let tail = self
+            .doc
+            .src
+            .get(start..)
+            .expect("node starts in the source");
+        let len = match n.tag {
+            NodeTag::Obj | NodeTag::Arr => {
+                // Container b stores its child count. Locate the closing delimiter
+                // only on demand, without an extra offset on every tape node.
+                use crate::lex::{Lexer, Token, slice::SliceLexer};
+                let mut lexer = SliceLexer::new(tail, false);
+                let mut depth = 0usize;
+                loop {
+                    match lexer.next_token().expect("the document was validated") {
+                        Token::ObjBegin | Token::ArrBegin => depth += 1,
+                        Token::ObjEnd | Token::ArrEnd => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break lexer.offset();
+                            }
+                        }
+                        Token::Eof => unreachable!("validated container has a closer"),
+                        _ => {}
+                    }
+                }
+            }
+            _ => n.b as usize,
+        };
+        core::str::from_utf8(tail.get(..len).expect("node ends in the source"))
+            .expect("token text was validated")
     }
 
     /// String value: borrowed when unescaped, owned only when it had escapes.
@@ -79,12 +114,16 @@ impl<'d, 'a> Value<'d, 'a> {
 
     /// Integer value (fast path, no float fallback).
     pub fn as_i64(&self) -> Option<i64> {
-        (self.node().tag == NodeTag::Num).then(|| crate::num::parse_i64(self.raw().as_bytes())).flatten()
+        (self.node().tag == NodeTag::Num)
+            .then(|| crate::num::parse_i64(self.raw().as_bytes()))
+            .flatten()
     }
 
     /// Float value (core `f64::from_str`, already Eisel–Lemire).
     pub fn as_f64(&self) -> Option<f64> {
-        (self.node().tag == NodeTag::Num).then(|| self.raw().parse().ok()).flatten()
+        (self.node().tag == NodeTag::Num)
+            .then(|| self.raw().parse().ok())
+            .flatten()
     }
 
     /// `true` for `null`.
@@ -107,17 +146,29 @@ impl<'d, 'a> Value<'d, 'a> {
     /// Array iterator.
     pub fn elements(&self) -> Option<ArrayIter<'d, 'a>> {
         let n = self.node();
-        (n.tag == NodeTag::Arr).then(|| ArrayIter { doc: self.doc, next: self.idx + 1, end: n.c })
+        (n.tag == NodeTag::Arr).then(|| ArrayIter {
+            doc: self.doc,
+            next: self.idx + 1,
+            end: n.c,
+        })
     }
 
     /// Object iterator yielding `(key, value)`.
     pub fn entries(&self) -> Option<ObjectIter<'d, 'a>> {
         let n = self.node();
-        (n.tag == NodeTag::Obj).then(|| ObjectIter { doc: self.doc, next: self.idx + 1, end: n.c })
+        (n.tag == NodeTag::Obj).then(|| ObjectIter {
+            doc: self.doc,
+            next: self.idx + 1,
+            end: n.c,
+        })
     }
 
     fn skip(doc: &Document<'_>, idx: u32) -> u32 {
-        let n = doc.tape[idx as usize];
+        let n = doc
+            .tape
+            .get(idx as usize)
+            .copied()
+            .expect("iterator visits a parsed tape node");
         match n.tag {
             NodeTag::Arr | NodeTag::Obj => n.c,
             _ => idx + 1,

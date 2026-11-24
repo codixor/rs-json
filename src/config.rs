@@ -4,8 +4,9 @@
 /// Hard limits that protect against hostile input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum container nesting. The parser is iterative, so this is a
-    /// policy limit, not a stack-safety one. Default 512 (serde_json uses 128).
+    /// Maximum number of simultaneously open arrays and objects (default 512).
+    /// A scalar has depth zero. A root container has depth one, including an empty one.
+    /// The first opener beyond the limit reports [`crate::ErrorKind::DepthLimit`].
     pub max_depth: u32,
     /// Maximum input size for the tape DOM (tape offsets are `u32`).
     /// Larger inputs must use the streaming layer.

@@ -25,7 +25,11 @@ pub struct NestStack {
 impl NestStack {
     /// Empty stack.
     pub const fn new() -> Self {
-        Self { inline: [0; 2], spill: Vec::new(), depth: 0 }
+        Self {
+            inline: [0; 2],
+            spill: Vec::new(),
+            depth: 0,
+        }
     }
 
     /// Current depth.
@@ -41,18 +45,25 @@ impl NestStack {
     }
 
     fn word(&mut self, idx: usize) -> &mut u64 {
-        if idx < 2 {
-            &mut self.inline[idx]
-        } else {
-            let s = idx - 2;
-            if s >= self.spill.len() {
-                self.spill.resize(s + 1, 0);
+        match idx {
+            0 => &mut self.inline[0],
+            1 => &mut self.inline[1],
+            _ => {
+                let slot = idx - 2;
+                if slot >= self.spill.len() {
+                    self.spill.resize(slot + 1, 0);
+                }
+                self.spill
+                    .get_mut(slot)
+                    .expect("spill storage covers this level")
             }
-            &mut self.spill[s]
         }
     }
 
-    /// Push a frame; `Err(())` when `max_depth` would be exceeded.
+    /// Push one open container.
+    ///
+    /// # Errors
+    /// Returns an error before allocating when the requested depth exceeds the limit.
     #[allow(clippy::result_unit_err)]
     pub fn push(&mut self, f: Frame, max_depth: u32) -> Result<(), ()> {
         if self.depth >= max_depth {
@@ -61,7 +72,11 @@ impl NestStack {
         let d = self.depth as usize;
         let w = self.word(d / 64);
         let bit = 1u64 << (d % 64);
-        if f == Frame::Object { *w |= bit } else { *w &= !bit }
+        if f == Frame::Object {
+            *w |= bit;
+        } else {
+            *w &= !bit;
+        }
         self.depth += 1;
         Ok(())
     }
@@ -76,8 +91,16 @@ impl NestStack {
     /// Peek the top frame.
     pub fn top(&self) -> Option<Frame> {
         let d = self.depth.checked_sub(1)? as usize;
-        let w = if d / 64 < 2 { self.inline[d / 64] } else { self.spill[d / 64 - 2] };
-        Some(if w >> (d % 64) & 1 == 1 { Frame::Object } else { Frame::Array })
+        let w = match d / 64 {
+            0 => self.inline[0],
+            1 => self.inline[1],
+            word => *self.spill.get(word - 2)?,
+        };
+        Some(if w >> (d % 64) & 1 == 1 {
+            Frame::Object
+        } else {
+            Frame::Array
+        })
     }
 }
 
@@ -89,11 +112,19 @@ mod tests {
     fn deep_push_pop() {
         let mut s = NestStack::new();
         for i in 0..10_000u32 {
-            let f = if i % 3 == 0 { Frame::Object } else { Frame::Array };
+            let f = if i % 3 == 0 {
+                Frame::Object
+            } else {
+                Frame::Array
+            };
             s.push(f, u32::MAX).unwrap();
         }
         for i in (0..10_000u32).rev() {
-            let f = if i % 3 == 0 { Frame::Object } else { Frame::Array };
+            let f = if i % 3 == 0 {
+                Frame::Object
+            } else {
+                Frame::Array
+            };
             assert_eq!(s.pop(), Some(f));
         }
         assert_eq!(s.pop(), None);

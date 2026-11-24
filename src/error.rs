@@ -58,12 +58,20 @@ impl Pos {
     pub fn resolve(src: &[u8], offset: u64) -> Self {
         let end = usize::try_from(offset).unwrap_or(usize::MAX).min(src.len());
         let head = src.get(..end).unwrap_or(src);
-        let line = head.iter().filter(|&&b| b == b'\n').count();
-        let line_start = head.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        let mut line = 1u32;
+        let mut line_start = 0;
+        for (i, &byte) in head.iter().enumerate() {
+            if byte == b'\n' {
+                line = line.saturating_add(1);
+                line_start = i + 1;
+            }
+        }
         Self {
             offset,
-            line: u32::try_from(line + 1).unwrap_or(u32::MAX),
-            col: u32::try_from(end - line_start + 1).unwrap_or(u32::MAX),
+            line,
+            col: u32::try_from(end - line_start)
+                .unwrap_or(u32::MAX)
+                .saturating_add(1),
         }
     }
 }
@@ -81,7 +89,10 @@ pub struct Error {
 impl Error {
     /// Build an error at a byte offset; line/col filled from `src`.
     pub fn at(src: &[u8], offset: usize, kind: ErrorKind) -> Self {
-        Self { kind, pos: Pos::resolve(src, offset as u64) }
+        Self {
+            kind,
+            pos: Pos::resolve(src, offset as u64),
+        }
     }
 
     /// Byte offset accessor (compat with old `JsonError::index`).

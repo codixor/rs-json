@@ -3,13 +3,13 @@
 //!
 //! * [`slice::SliceLexer`] — whole input in memory; token content is always a
 //!   borrowed sub-slice. Used by the tape DOM and the small-file path.
-//! * [`read::ReadLexer`] (feature `read`) — refills a fixed buffer from
+//! * `read::ReadLexer` (feature `read`) — refills a fixed buffer from
 //!   `io::Read`; a token that straddles a refill is copied into a reusable
 //!   spill buffer (bounded by `Limits::max_token_bytes`).
 
-pub mod slice;
 #[cfg(feature = "read")]
 pub mod read;
+pub mod slice;
 
 /// Lexical token kinds. Content of `Str`/`Num` is fetched from the lexer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,4 +63,11 @@ pub trait Lexer {
     fn span(&self) -> Span;
     /// Raw content bytes of the last `Str`/`Num` token (escapes intact).
     fn content(&self) -> &[u8];
+    /// Resolve a byte offset on the error path. Stream lexers can supply line and column.
+    fn position(&self, offset: u64) -> crate::Pos {
+        crate::Pos {
+            offset,
+            ..crate::Pos::default()
+        }
+    }
 }
