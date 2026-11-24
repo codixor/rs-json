@@ -1,12 +1,17 @@
 //! Medium/large in-memory documents from the nativejson-benchmark corpus
-//! (twitter.json 617 KB string/unicode heavy, citm_catalog.json 1.7 MB
+//! (twitter.json 617 KB string/unicode heavy, `citm_catalog.json` 1.7 MB
 //! structure heavy, canada.json 2.2 MB float heavy) plus generated files.
 //! Run `scripts/fetch-corpus.sh` first; missing files are skipped.
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-const FILES: &[&str] = &["twitter.json", "citm_catalog.json", "canada.json", "gen_mixed_16mb.json"];
+const FILES: &[&str] = &[
+    "twitter.json",
+    "citm_catalog.json",
+    "canada.json",
+    "gen_mixed_16mb.json",
+];
 
 fn bench(c: &mut Criterion) {
     for file in FILES {

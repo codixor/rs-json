@@ -56,7 +56,10 @@ impl FileDocument {
 /// # Errors
 /// I/O errors from open/stat/read/mmap.
 #[cfg(feature = "std")]
-pub fn parse_file(path: impl AsRef<std::path::Path>, cfg: BufConfig) -> std::io::Result<FileDocument> {
+pub fn parse_file(
+    path: impl AsRef<std::path::Path>,
+    cfg: BufConfig,
+) -> std::io::Result<FileDocument> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
     let len = f.metadata()?.len();
@@ -69,5 +72,7 @@ pub fn parse_file(path: impl AsRef<std::path::Path>, cfg: BufConfig) -> std::io:
     let _ = cfg.small_file_max;
     let mut buf = alloc::vec::Vec::with_capacity(usize::try_from(len).unwrap_or(0) + 1);
     f.read_to_end(&mut buf)?;
-    Ok(FileDocument { storage: Storage::Heap(buf) })
+    Ok(FileDocument {
+        storage: Storage::Heap(buf),
+    })
 }

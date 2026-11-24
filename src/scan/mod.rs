@@ -13,9 +13,9 @@
 //! the DOM stays zero-copy (simd-json needs a padded mutable copy).
 
 mod scalar;
-mod swar;
 #[cfg(feature = "simd")]
 mod simd;
+mod swar;
 
 pub use scalar::{is_string_boring, skip_ws_scalar};
 
@@ -49,7 +49,7 @@ fn wide_run_end(buf: &[u8], i: usize) -> usize {
     #[cfg(feature = "simd")]
     {
         let j = simd::string_run_end(buf, i);
-        return scalar::finish(buf, j);
+        scalar::finish(buf, j)
     }
     #[cfg(not(feature = "simd"))]
     {

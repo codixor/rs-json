@@ -23,7 +23,11 @@ pub fn parse_i64(lit: &[u8]) -> Option<i64> {
         acc = acc.checked_mul(10)?.checked_add(u64::from(d - b'0'))?;
     }
     if neg {
-        if acc == 1u64 << 63 { Some(i64::MIN) } else { i64::try_from(acc).ok().map(|v| -v) }
+        if acc == 1u64 << 63 {
+            Some(i64::MIN)
+        } else {
+            i64::try_from(acc).ok().map(|v| -v)
+        }
     } else {
         i64::try_from(acc).ok()
     }

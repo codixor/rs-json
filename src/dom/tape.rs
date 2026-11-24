@@ -48,11 +48,25 @@ impl Node {
 
     /// Scalar node.
     pub const fn scalar(tag: NodeTag, start: u32, len: u32, flags: u8) -> Self {
-        Self { tag, flags, _pad: 0, a: start, b: len, c: 0 }
+        Self {
+            tag,
+            flags,
+            _pad: 0,
+            a: start,
+            b: len,
+            c: 0,
+        }
     }
 
     /// Container node to be patched on close.
     pub const fn open(tag: NodeTag, start: u32) -> Self {
-        Self { tag, flags: 0, _pad: 0, a: start, b: 0, c: 0 }
+        Self {
+            tag,
+            flags: 0,
+            _pad: 0,
+            a: start,
+            b: 0,
+            c: 0,
+        }
     }
 }
