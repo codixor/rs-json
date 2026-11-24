@@ -3,14 +3,21 @@
 use crate::ErrorKind;
 use alloc::string::String;
 
-fn hex_quad(bytes: &[u8]) -> Result<u16, ErrorKind> {
-    let digits = bytes.get(..4).ok_or(ErrorKind::UnexpectedEof)?;
+pub(crate) enum EscapeError {
+    Invalid(ErrorKind),
+    Incomplete(ErrorKind),
+}
+
+use EscapeError::{Incomplete, Invalid};
+
+fn hex_quad(bytes: &[u8]) -> Result<u16, EscapeError> {
+    let digits = bytes.get(..4).ok_or(Incomplete(ErrorKind::UnexpectedEof))?;
     digits.iter().try_fold(0u16, |n, &byte| {
         let digit = match byte {
             b'0'..=b'9' => byte - b'0',
             b'a'..=b'f' => byte - b'a' + 10,
             b'A'..=b'F' => byte - b'A' + 10,
-            _ => return Err(ErrorKind::InvalidString),
+            _ => return Err(Invalid(ErrorKind::InvalidString)),
         };
         Ok((n << 4) | u16::from(digit))
     })
@@ -18,30 +25,42 @@ fn hex_quad(bytes: &[u8]) -> Result<u16, ErrorKind> {
 
 /// Decode one escape starting immediately after its backslash.
 pub(crate) fn escape(bytes: &[u8]) -> Result<(char, usize), ErrorKind> {
-    let (&first, tail) = bytes.split_first().ok_or(ErrorKind::UnexpectedEof)?;
+    escape_prefix(bytes).map_err(|e| match e {
+        Invalid(kind) | Incomplete(kind) => kind,
+    })
+}
+
+// A refill can complete a partial escape. At true EOF, report its original error kind.
+pub(crate) fn escape_prefix(bytes: &[u8]) -> Result<(char, usize), EscapeError> {
+    let (&first, tail) = bytes
+        .split_first()
+        .ok_or(Incomplete(ErrorKind::UnexpectedEof))?;
     if first == b'u' {
         let high = hex_quad(tail)?;
         let (code, len) = match high {
             0xd800..=0xdbff => {
-                let pair = tail
-                    .get(4..)
-                    .and_then(|s| s.strip_prefix(b"\\u"))
-                    .ok_or(ErrorKind::LoneSurrogate)?;
+                let rest = tail.get(4..).unwrap_or_default();
+                if rest.len() < 2 && b"\\u".starts_with(rest) {
+                    return Err(Incomplete(ErrorKind::LoneSurrogate));
+                }
+                let pair = rest
+                    .strip_prefix(b"\\u")
+                    .ok_or(Invalid(ErrorKind::LoneSurrogate))?;
                 let low = hex_quad(pair)?;
                 if !(0xdc00..=0xdfff).contains(&low) {
-                    return Err(ErrorKind::LoneSurrogate);
+                    return Err(Invalid(ErrorKind::LoneSurrogate));
                 }
                 (
                     0x10000 + (u32::from(high - 0xd800) << 10) + u32::from(low - 0xdc00),
                     11,
                 )
             }
-            0xdc00..=0xdfff => return Err(ErrorKind::LoneSurrogate),
+            0xdc00..=0xdfff => return Err(Invalid(ErrorKind::LoneSurrogate)),
             _ => (u32::from(high), 5),
         };
         return char::from_u32(code)
             .map(|ch| (ch, len))
-            .ok_or(ErrorKind::InvalidString);
+            .ok_or(Invalid(ErrorKind::InvalidString));
     }
     let ch = match first {
         b'"' => '"',
@@ -52,7 +71,7 @@ pub(crate) fn escape(bytes: &[u8]) -> Result<(char, usize), ErrorKind> {
         b'n' => '\n',
         b'r' => '\r',
         b't' => '\t',
-        _ => return Err(ErrorKind::InvalidString),
+        _ => return Err(Invalid(ErrorKind::InvalidString)),
     };
     Ok((ch, 1))
 }
