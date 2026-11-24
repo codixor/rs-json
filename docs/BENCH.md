@@ -22,16 +22,14 @@ CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0 \
   cargo bench --locked --bench parse_small -- 'rs_json::' --quick --noplot
 ```
 
-The S2 performance gate still needs a comparison with 0.1 on the same inputs
-and a steady-state allocation count. The larger corpus, reader benchmarks and
-native-CPU measurements belong to the remaining roadmap.
+The Ryzen measurements below compare both versions on these same fixtures.
 
 ## Reader refill sizes
 
 The reader consumes the same 12,545-byte JSON array of 256 records at each buffer
 size. Each iteration creates a reader and consumes every event through EOF.
 The input is memory-backed. These times measure tokenization and refill
-handling. File I/O and peak resident memory require separate measurements.
+handling. The 1 GiB run below measures peak resident memory separately.
 
 Windows 11 x64, Intel Core i9-9820X, Rust 1.100.0, default CPU target.
 The optimized quick run used one build job with LTO and debug symbols disabled.
@@ -47,3 +45,98 @@ The optimized quick run used one build job with LTO and debug symbols disabled.
 CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0 \
   cargo bench --locked --features read --bench stream_large -- reader_buffers --quick --noplot
 ```
+
+## 1 GiB streaming reader RSS
+
+At commit `20bcd689d2bead361f94fda74ce48620a1a3ea58`, each fresh parser
+process consumed 1,073,741,824 bytes of NDJSON and verified 4,227,072 documents
+and 46,497,792 events through EOF. A repeating 32 KiB block supplied 128 short
+records and one 16 KiB record per block. The generator and the parser shared a
+process. The input was generated in memory.
+
+| Read buffer (bytes) | Peak RSS (KiB) | Limit (bytes) | Result |
+| ---: | ---: | ---: | :--- |
+| 1 | 1,992 | 8,388,612 | Pass |
+| 7 | 1,936 | 8,388,636 | Pass |
+| 64 | 2,056 | 8,388,864 | Pass |
+| 8,192 | 1,940 | 8,421,376 | Pass |
+
+The limit is 8 MiB plus four times the read buffer. RSS is the Linux kernel's
+process high-water mark (`VmHWM`), read after EOF and before process exit.
+The test ran on `arbi-pc` under WSL2 Linux, AMD Ryzen 9 9950X3D2, Rust 1.100.0,
+with the `read` feature and a release build. The cgroup allowed 25 ms per 100 ms
+on one logical CPU. The load guard delayed the final run until three consecutive readings were below
+the thresholds.
+
+## Small-document allocations and latency on Ryzen 9
+
+All four inputs come from `benches/support/small_inputs.rs`. The allocation
+test runs in its own single-threaded executable. A boxed value verifies that
+the counter sees heap activity. Each fixture starts with a fresh 0.2 parser,
+parses once to warm it, then parses the same input another 1,000 times.
+
+| Input | Bytes | Cold allocations | Warm allocations | Warm reallocations | Warm deallocations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 11 | 2 | 0 | 0 | 0 |
+| `ticker` | 169 | 2 | 0 | 0 | 0 |
+| `escaped` | 73 | 2 | 0 | 0 | 0 |
+| `nested` | 198 | 2 | 0 | 0 | 0 |
+
+Warm counts are totals over all 1,000 calls per row. Larger or deeper inputs
+can grow the retained buffers again. The dev dependency `stats_alloc 0.1.10`
+provides the counting allocator for this test. A separate Criterion executable
+uses the normal allocator for timing. Its `rs-json-010` dev dependency pins
+the published `rs-json 0.1.0`, so both versions run in the same executable.
+Each one-shot iteration parses the document and drops the resulting DOM.
+The reuse iteration returns a document view and retains the parser's buffers.
+
+The benchmark harness at `9f1f356` uses the 0.2 parser from `20bcd689`.
+Criterion 0.8.2 ran on the same Ryzen 9 and Rust 1.100.0, with default crate
+features, one Cargo job, one codegen unit, and LTO and debug symbols disabled.
+The benchmark used logical CPU 21, nice 15, and a cgroup quota of 25 ms per
+100 ms. These are wall-clock latencies under that quota. The load guard halted
+work at 35% Windows or WSL CPU utilization, or a WSL one-minute load of 7.7
+on 22 logical CPUs. An interrupted timing run restarted at warmup after three
+consecutive readings below all thresholds.
+
+Timing cells give **ns/document (MiB/s)** from Criterion’s regression slope.
+Each measurement used a one-second warmup, 20 samples over eight seconds, and
+10,000 bootstrap resamples. Speedup divides the 0.1.0 time by the 0.2 time.
+Values above 1 favor 0.2.
+
+### Default x86-64 target
+
+| Input | 0.1.0 one-shot | 0.2 one-shot | 0.2 reuse | One-shot speedup | Reuse speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 123.6 (84.9) | 211.2 (49.7) | 149.9 (70.0) | 0.59× | 0.82× |
+| `ticker` | 813.9 (198.0) | 1506.8 (107.0) | 1248.1 (129.1) | 0.54× | 0.65× |
+| `escaped` | 224.3 (310.3) | 497.7 (139.9) | 342.2 (203.4) | 0.45× | 0.66× |
+| `nested` | 1687.0 (111.9) | 2373.1 (79.6) | 1985.5 (95.1) | 0.71× | 0.85× |
+
+### Native Ryzen target
+
+| Input | 0.1.0 one-shot | 0.2 one-shot | 0.2 reuse | One-shot speedup | Reuse speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 124.2 (84.4) | 192.3 (54.5) | 143.1 (73.3) | 0.65× | 0.87× |
+| `ticker` | 784.8 (205.4) | 1244.6 (129.5) | 1069.2 (150.7) | 0.63× | 0.73× |
+| `escaped` | 220.5 (315.7) | 459.9 (151.4) | 324.2 (214.7) | 0.48× | 0.68× |
+| `nested` | 1596.1 (118.3) | 2178.8 (86.7) | 1828.3 (103.3) | 0.73× | 0.87× |
+
+The allocation target passed on all four fixtures. The G1 goal of 2× the
+0.1.0 parsing speed remains open. Even with a warmed parser, 0.2 took
+18–53% more time with the default target and 15–47% more time with native
+code generation. These measurements cover the slice DOM entry points.
+
+To reproduce one timing in a shell with the same CPU quota, affinity and load
+guard, substitute any fixture and lane from the tables. For the native pass,
+replace `unset RUSTFLAGS` with `export RUSTFLAGS="-C target-cpu=native"`.
+
+```sh
+export CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0
+unset RUSTFLAGS
+cargo test --locked --profile bench --test alloc_count
+cargo bench --locked --bench parse_small -- 'small/ticker/rs_json_010::parse' \
+  --exact --warm-up-time 1 --measurement-time 8 --sample-size 20 --nresamples 10000 --noplot
+```
+
+The 0.2 lane IDs are `rs_json::parse` and `rs_json::Parser(reuse)`.

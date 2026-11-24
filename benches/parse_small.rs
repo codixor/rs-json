@@ -4,24 +4,11 @@
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-const SAMPLES: &[(&str, &str)] = &[
-    ("tiny_ok", r#"{"ok":true}"#),
-    (
-        "ticker",
-        r#"{"e":"24hrTicker","E":1732450000123,"s":"BTCUSDT","p":"-120.50","P":"-0.13","c":"94210.10","Q":"0.012","b":"94210.00","a":"94210.10","v":"18234.551","q":"1717171717.12"}"#,
-    ),
-    (
-        "escaped",
-        r#"{"msg":"line1\nline2 \"quoted\" \u00e9\ud83d\ude00","path":"C:\\temp\\x"}"#,
-    ),
-    (
-        "nested",
-        r#"{"meta":{"name":"json","versions":[1,2,3,4]},"users":[{"id":1,"name":"a","flags":[true,false,null]},{"id":2,"name":"b","flags":[false,true,null]}],"config":{"retry":3,"timeout":1.25,"enabled":true}}"#,
-    ),
-];
+#[path = "support/small_inputs.rs"]
+mod small_inputs;
 
 fn bench(c: &mut Criterion) {
-    for (name, doc) in SAMPLES {
+    for (name, doc) in small_inputs::SAMPLES {
         let mut g = c.benchmark_group(format!("small/{name}"));
         g.throughput(Throughput::Bytes(doc.len() as u64));
         g.bench_function("serde_json::Value", |b| {
@@ -42,6 +29,9 @@ fn bench(c: &mut Criterion) {
                 );
             });
         }
+        g.bench_function("rs_json_010::parse", |b| {
+            b.iter(|| rs_json_010::parse(black_box(doc)).unwrap());
+        });
         g.bench_function("rs_json::parse", |b| {
             b.iter(|| rs_json::parse(black_box(doc)).unwrap());
         });
