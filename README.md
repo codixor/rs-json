@@ -1,275 +1,38 @@
-# rs-json
+# rs-json 0.2 skeleton
 
-A zero-copy JSON parser with Serde helpers and JSON-LD builders. This repository imports the working 0.1.0 crate from `codixor/rust-misc` at `ae68abb54c655a8fcc009123fbc31821b82435e4`. The [0.2 staging branch](https://github.com/codixor/rs-json/tree/staging/0.2-skeleton) contains the proposed redesign.
+This branch stages the proposed 0.2 API and development plan. Several parser entry points are placeholders. The [main branch](https://github.com/codixor/rs-json/tree/main) contains the working 0.1 crate. The supplied workflow is staged for review in [docs/ci-draft.yml](docs/ci-draft.yml).
 
-The 0.1 parser uses recursion and has no nesting-depth limit. For untrusted documents, use a parser that enforces a depth limit before processing them with this API.
+Zero-copy JSON for Rust 1.100+, one lexer core for every input size:
 
-The crate is intentionally small:
-- library-first
-- zero-copy DOM that borrows from the input
-- typed `thiserror` errors
-- crate-root tests, examples, and Criterion benches
-
-## Public API
-
-```rust
-use rs_json::{JsonError, JsonItem, JsonType, parse};
-
-fn inspect(source: &str) -> Result<JsonItem<'_>, JsonError> {
-    parse(source)
-}
-```
-
-The core public surface is:
-- `parse(&str) -> Result<JsonItem<'_>, JsonError>`
-- serde-backed typed codec helpers:
-  - `to_vec`
-  - `to_string`
-  - `to_value`
-  - `from_slice`
-  - `from_str`
-  - `from_value`
-- `JsonItem` traversal helpers:
-  - `as_str`
-  - `as_f64`
-  - `as_i128`
-  - `as_bool`
-  - `exists`
-  - `is_null`
-  - `kind`
-  - `elements`
-  - `entries`
-- additive owned JSON-LD builders:
-  - `JsonLdDocument`
-  - `JsonLdObject`
-  - `JsonLdArray`
-
-`JsonItem::as_str()` returns the raw slice from the source text. For strings, that means:
-- quotes are removed
-- escapes are preserved exactly as written
-- no unescaping allocation happens in the core parser
-
-For typed JSON serialization and deserialization, the crate now also exposes a
-workspace-owned serde facade. That keeps downstream crates on `rs_json::*`
-instead of wiring `serde_json` directly.
-
-## JSON-LD
-
-`rs-json` now also includes an additive owned JSON-LD builder surface under
-`rs_json::ld`.
+- **Tape DOM** — `rs_json::parse(&str)` / reusable `Parser` (zero
+  allocations per document after warm-up), 16-byte nodes, O(1) subtree skip.
+- **Streaming** — `PullParser` over a slice or any `io::Read` with a fixed
+  buffer; constant memory on multi-GB files; `skip_value` and streaming JSON
+  Pointer selection.
+- **Files** — `input::parse_file` picks read-to-buffer, mmap or streaming
+  by size. NDJSON helper.
+- Strings stay borrowed unless they contain escapes; numbers convert on
+  access. SIMD string scanning via `wide` (SSE2/AVX2/NEON/simd128), SWAR and
+  scalar fallbacks, no input padding, `no_std + alloc`.
 
 ```rust
-use rs_json::{JsonLdDocument, JsonLdObject};
-
-let doc = JsonLdDocument::new()
-    .context("https://schema.org")
-    .ty("Product")
-    .field("name", "Widget")
-    .field(
-        "offers",
-        JsonLdObject::new()
-            .ty("Offer")
-            .field("price", "19.99")
-            .field("priceCurrency", "USD"),
-    );
-
-let json = doc.to_json_string().unwrap();
-let script = doc.to_script_tag().unwrap();
+let doc = rs_json::parse(r#"{"s":"BTCUSDT","p":"94210.10","q":[1,2,3]}"#)?;
+let root = doc.root();
+assert_eq!(root.get("s").unwrap().as_str().unwrap(), "BTCUSDT");
 ```
 
-This JSON-LD surface is intentionally:
-- additive to the parser API
-- explicit and non-macro-first
-- usable without caller-side serde derives
-- still able to accept raw `serde_json::Value` escape hatches when needed
+| Feature | Default | Adds |
+|---------|---------|------|
+| `std` | ✓ | std I/O, file helpers |
+| `simd` / `simd-dyn` | ✓ | `wide` kernels / x86 runtime AVX2 dispatch |
+| `read` | | `io::Read` streaming lexer |
+| `mmap` | | memory-mapped files |
+| `ndjson` | | line splitting (`memchr`) |
+| `pointer` | | streaming JSON Pointer |
+| `serde` / `ld` | | serde_json facade / JSON-LD + Google builders |
+| `legacy` | | old `JsonItem` API shim |
 
-The current JSON-LD core also keeps the render path lean:
-- document JSON rendering serializes the root map directly
-- script-tag rendering avoids an extra formatting round
-- owned JSON-LD objects and arrays start with small reserved capacity because
-  the common schema shapes are not truly empty containers
+Status: 0.2 skeleton — see `docs/PLAN.md`. Design rationale and review of
+the previous version: `docs/ANALYSIS.md`.
 
-The first Google-oriented builders now live under `rs_json::ld::google`, with
-family entrypoints such as:
-- `rs_json::ld::google::commerce`
-- `rs_json::ld::google::publishing`
-- `rs_json::ld::google::business`
-- `rs_json::ld::google::navigation`
-- `rs_json::ld::google::reviews`
-- `rs_json::ld::google::jobs_events`
-- `rs_json::ld::google::media`
-- `rs_json::ld::google::forum_qa`
-- `rs_json::ld::google::education`
-- `rs_json::ld::google::profiles`
-- `rs_json::ld::google::software`
-- `rs_json::ld::google::data_travel`
-
-```rust
-use rs_json::ld::google::{
-    commerce::{Offer, Product, ProductGroup},
-    navigation::{BreadcrumbList, BreadcrumbListItem},
-};
-
-let coat = Product::new("Wool winter coat - green, size small")
-    .sku("COAT-GREEN-S")
-    .in_product_group_with_id("coat-001")
-    .offer(Offer::new("149.00", "USD"));
-
-let document = ProductGroup::new("Wool winter coat", "coat-001")
-    .varies_by_schema_property("color")
-    .varies_by_schema_property("size")
-    .variant(coat)
-    .into_document();
-
-let breadcrumb = BreadcrumbList::new()
-    .item(BreadcrumbListItem::new(1, "Home").item("https://example.com"))
-    .item(BreadcrumbListItem::new(2, "Coats"));
-
-let _json = document.to_json_string().unwrap();
-let _script = breadcrumb.into_document().to_script_tag().unwrap();
-```
-
-Supported Google-oriented builders today:
-- business/navigation:
-  - `Organization`
-  - `LocalBusiness`
-  - `BreadcrumbList`
-- publishing:
-  - `Article`
-  - `NewsArticle`
-  - `BlogPosting`
-  - `Recipe`
-- reviews:
-  - `Review`
-  - `AggregateRating`
-- commerce:
-  - `ProductGroup`
-  - `Product`
-  - `Offer`
-  - `AggregateOffer`
-  - `MerchantReturnPolicy`
-  - `OfferShippingDetails`
-- jobs/events:
-  - `JobPosting`
-  - `Event`
-  - `Place`
-  - `PostalAddress`
-  - `VirtualLocation`
-- media:
-  - `VideoObject`
-  - `Clip`
-  - `BroadcastEvent`
-- forum / Q&A:
-  - `QAPage`
-  - `Question`
-  - `Answer`
-  - `DiscussionForumPosting`
-  - `ForumComment`
-- education:
-  - `Quiz`
-  - `FlashcardQuestion`
-  - `Course`
-  - `CourseList`
-- profiles / software:
-  - `ProfilePage`
-  - `ProfilePerson`
-  - `SoftwareApplication`
-- data / travel:
-  - `Dataset`
-  - `DataCatalog`
-  - `DataDownload`
-  - `VacationRental`
-  - `Accommodation`
-
-## Examples
-
-Run the examples with:
-
-```sh
-cargo run --example parse_object
-cargo run --example traverse_nested
-cargo run --example inspect_error
-cargo run --example json_ld_hand_built
-cargo run --example json_ld_google_product
-cargo run --example json_ld_google_organization_policy
-cargo run --example json_ld_google_breadcrumb
-cargo run --example json_ld_google_news
-cargo run --example json_ld_google_job
-cargo run --example json_ld_google_event
-cargo run --example json_ld_google_local_business
-cargo run --example json_ld_google_video
-cargo run --example json_ld_google_forum_qa
-cargo run --example json_ld_google_education
-cargo run --example json_ld_google_profile_software
-cargo run --example json_ld_google_dataset_travel
-```
-
-## Validation
-
-```sh
-bash scripts/validate.sh
-```
-
-That covers:
-- tests
-- examples
-- strict clippy
-- docs
-- bench compilation
-
-## Benchmarks
-
-```sh
-bash scripts/bench.sh
-bash scripts/bench-json-ld.sh
-```
-
-The current Criterion surface covers:
-- small document parse
-- nested document parse
-- string-heavy document parse
-- number-heavy document parse
-- repeated key traversal
-- invalid document rejection
-- JSON-LD builder and render baselines
-- dedicated JSON-LD family slices for:
-  - local/business
-  - media/video
-- bench-only JSON-LD object-store comparison slices for:
-  - current `serde_json::Map`
-  - `indexmap`
-  - `hashbrown`
-  - `hashbrown` + `ahash`
-
-Current comparison baselines:
-- `serde_json`
-- legacy `json 0.12.4`
-- `simd-json` on `x86_64` / `aarch64`
-- `sonic-rs` on `x86_64` / `aarch64`
-
-The latest measured decision was conservative on purpose: a `memchr`-based
-string-scan experiment did not clear the adoption bar because it regressed the
-common small and nested parse lanes, so the parser keeps the simpler baseline
-for now.
-
-The same rule closed the remaining helper-crate ideas too:
-- `smallvec` / `arrayvec` are a poor fit for the recursive zero-copy DOM unless
-  we change the tree shape with extra indirection
-- `compact_str` is not justified because the hot path intentionally borrows
-  strings from the source instead of owning them
-
-## Direction
-
-This crate is now treated as first-party workspace code, not an untouched donor snapshot. The current parser line is owned here and can evolve behind the small public API.
-
-Future interop work with `kdl` now follows a measured rule:
-
-- use the shared neutral interop model as the preferred bridge
-- use the generated JSON-on-KDL contract only when the caller actually needs a
-  KDL `Document`
-
-That keeps JSON parsing performance work independent from format-conversion policy and avoids forcing JSON through KDL-shaped structure when the shared model is enough.
-
-## Releases
-
-Pushes to `main` run checks. A pushed `v<version>` tag matching `Cargo.toml` runs the checks, publishes through the GitHub `cratesio` environment and creates the GitHub release for that tag.
+License: MIT OR Apache-2.0.

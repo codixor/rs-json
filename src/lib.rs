@@ -1,47 +1,65 @@
-//! Lightweight JSON parsing for the workspace.
+//! `rs-json` — zero-copy JSON for every input size.
 //!
-//! The crate stays intentionally small:
-//! - zero-copy views into the source input
-//! - simple DOM traversal helpers
-//! - parser-first API with typed errors
-//! - serde-backed encode/decode helpers behind the same workspace facade
+//! Three layers share one lexer core:
+//!
+//! | Layer | Entry point | Use when |
+//! |-------|-------------|----------|
+//! | Tape DOM | [`parse`], [`Parser::parse`] | whole document in memory, random access |
+//! | Pull stream | [`stream::PullParser`] | huge or unbounded input, bounded memory |
+//! | File helper | [`input::parse_file`] | picks read-to-buffer vs mmap vs streaming by size |
+//!
+//! Work is deferred: strings are not unescaped and numbers are not converted
+//! until a caller asks, and every string token carries an `escaped` flag so
+//! the common no-escape path stays a borrowed `&str`.
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod error;
-mod generics;
-mod item;
-mod key;
-mod kind;
+extern crate alloc;
+
+pub mod config;
+pub mod dom;
+pub mod error;
+pub mod input;
+pub mod lex;
+pub mod num;
+pub mod scan;
+pub mod stack;
+pub mod stream;
+pub mod unescape;
+
+#[cfg(feature = "ndjson")]
+pub mod ndjson;
+
+#[cfg(feature = "serde")]
+pub mod serde_codec;
+
+#[cfg(feature = "ld")]
 pub mod ld;
-mod parser;
-mod serde_codec;
-mod slice;
 
-#[doc(inline)]
-pub use crate::error::{JsonError, JsonError as Error, JsonErrorKind};
-#[doc(inline)]
-pub use crate::generics::{ArrayIterator, MapIterator};
-#[doc(inline)]
-pub use crate::item::JsonItem;
-#[doc(inline)]
-pub use crate::key::Key;
-#[doc(inline)]
-pub use crate::kind::JsonType;
-#[doc(inline)]
-pub use crate::ld::{JsonLdArray, JsonLdDocument, JsonLdObject};
-#[doc(inline)]
-pub use crate::serde_codec::{
-    JsonSerdeError, JsonSerdeResult, JsonValue, from_reader, from_slice, from_str, from_value,
-    to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer, to_writer_pretty,
-};
+#[cfg(feature = "legacy")]
+pub mod legacy;
 
-/// Parse JSON text into a zero-copy DOM.
+pub use crate::config::Limits;
+pub use crate::dom::{Document, Parser, Value, ValueKind};
+pub use crate::error::{Error, ErrorKind, Pos};
+
+/// Parse a complete JSON text into a borrowed tape [`Document`].
 ///
-/// The returned [`JsonItem`] borrows from `source`, so the source text must
-/// outlive the parsed tree.
+/// One-shot convenience; allocates a fresh tape. For repeated small
+/// documents keep a [`Parser`] and call [`Parser::parse`] so the tape and
+/// stack allocations are reused (zero allocations after warm-up).
 ///
 /// # Errors
+/// Returns [`Error`] for invalid JSON or when a [`Limits`] bound is exceeded.
+pub fn parse(src: &str) -> Result<Document<'_>, Error> {
+    Document::parse_with(src.as_bytes(), Limits::default(), true)
+}
+
+/// Parse UTF-8 bytes. String contents are UTF-8 validated with `simdutf8`
+/// (structural bytes are ASCII, so only string payloads need checking).
 ///
-/// Returns [`JsonError`] when the input is not valid JSON.
-pub fn parse(source: &str) -> Result<JsonItem<'_>, JsonError> {
-    parser::parse(source)
+/// # Errors
+/// Returns [`Error`] for invalid JSON, invalid UTF-8, or exceeded limits.
+pub fn parse_bytes(src: &[u8]) -> Result<Document<'_>, Error> {
+    Document::parse_with(src, Limits::default(), false)
 }

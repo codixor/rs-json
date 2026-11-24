@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]   # macos = aarch64 NEON lane
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "1.100.0", components: "clippy,rustfmt" }
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+      - run: cargo test --no-default-features             # scalar/SWAR-only lane
+      - run: cargo check --benches --all-features
+  no_std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "1.100.0", targets: "thumbv7em-none-eabihf,wasm32-unknown-unknown" }
+      - run: cargo check --no-default-features --target thumbv7em-none-eabihf
+      - run: cargo check --no-default-features --features simd --target wasm32-unknown-unknown
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with: { components: miri }
+      - run: cargo miri test --lib scan:: stack::
