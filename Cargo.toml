@@ -1,0 +1,47 @@
+[package]
+name = "rs-json"
+description = "Lightweight zero-copy JSON parser for the rust-misc workspace"
+readme = "README.md"
+repository = "https://github.com/mwdghaz/rust-misc"
+keywords = ["json", "parser", "zero-copy", "dom"]
+categories = ["parsing", "encoding"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+name = "rs_json"
+
+[dependencies]
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+ahash.workspace = true
+criterion.workspace = true
+hashbrown.workspace = true
+indexmap.workspace = true
+legacy_json.workspace = true
+pretty_assertions.workspace = true
+serde = { workspace = true, features = ["std", "derive"] }
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dev-dependencies]
+simd-json.workspace = true
+sonic-rs.workspace = true
+
+[[bench]]
+name = "json_core"
+harness = false
+
+[[bench]]
+name = "json_serde"
+harness = false
+
+[[bench]]
+name = "json_ld"
+harness = false
+
+[lints]
+workspace = true
