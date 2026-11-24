@@ -15,3 +15,26 @@ pub(crate) const SAMPLES: &[(&str, &str)] = &[
         r#"{"meta":{"name":"json","versions":[1,2,3,4]},"users":[{"id":1,"name":"a","flags":[true,false,null]},{"id":2,"name":"b","flags":[false,true,null]}],"config":{"retry":3,"timeout":1.25,"enabled":true}}"#,
     ),
 ];
+
+/// A distinct payload with matching token boundaries.
+pub(crate) fn alternate(name: &str, original: &str) -> String {
+    let other = match name {
+        "tiny_ok" => original.replace("ok", "up"),
+        "ticker" => original
+            .replace("BTCUSDT", "SOLUSDT")
+            .replace("1732450000123", "2843561111234"),
+        "escaped" => original
+            .replace("line1", "first")
+            .replace("00e9", "00e4")
+            .replace("de00", "de01")
+            .replace("temp", "logs"),
+        "nested" => original
+            .replace("\"id\":1", "\"id\":8")
+            .replace("\"json\"", "\"rust\"")
+            .replace("1.25", "3.75"),
+        _ => unreachable!("each small fixture has a distinct payload"),
+    };
+    assert_ne!(original, other);
+    assert_eq!(original.len(), other.len());
+    other
+}

@@ -45,5 +45,37 @@ fn bench(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench);
+// Process every document in a cycle per iteration. Each returned document
+// borrows its own input, and setup stays outside the timed loop.
+fn cycle(c: &mut Criterion, name: &str, docs: &[&str]) {
+    let mut group = c.benchmark_group(format!("rotating/{name}"));
+    group.throughput(Throughput::Elements(docs.len() as u64));
+    group.bench_function("rs_json_010::parse", |b| {
+        b.iter(|| {
+            for &doc in black_box(docs) {
+                black_box(rs_json_010::parse(black_box(doc)).unwrap());
+            }
+        });
+    });
+    let mut parser = rs_json::Parser::new();
+    group.bench_function("rs_json::Parser(reuse)", |b| {
+        b.iter(|| {
+            for &doc in black_box(docs) {
+                black_box(parser.parse(black_box(doc)).unwrap());
+            }
+        });
+    });
+    group.finish();
+}
+
+fn rotating(c: &mut Criterion) {
+    for &(name, original) in small_inputs::SAMPLES {
+        let other = small_inputs::alternate(name, original);
+        cycle(c, name, &[original, &other]);
+    }
+    let mixed: Vec<_> = small_inputs::SAMPLES.iter().map(|&(_, s)| s).collect();
+    cycle(c, "mixed_shapes", &mixed);
+}
+
+criterion_group!(benches, bench, rotating);
 criterion_main!(benches);

@@ -41,4 +41,26 @@ fn main() {
             cold.allocations, warm.allocations, warm.reallocations, warm.deallocations
         );
     }
+    let changed: Vec<_> = small_inputs::SAMPLES
+        .iter()
+        .map(|&(n, s)| small_inputs::alternate(n, s))
+        .collect();
+    let mut parser = Parser::new();
+    for &(_, s) in small_inputs::SAMPLES {
+        black_box(parser.parse(black_box(s)).unwrap());
+    }
+    let warm = Region::new(GLOBAL);
+    for _ in 0..REPEATS {
+        for (&(_, s), other) in small_inputs::SAMPLES.iter().zip(&changed) {
+            black_box(parser.parse(black_box(other)).unwrap());
+            black_box(parser.parse(black_box(s)).unwrap());
+        }
+    }
+    let stats = warm.change();
+    assert_eq!(
+        (stats.allocations, stats.reallocations, stats.deallocations),
+        (0, 0, 0),
+        "alternating payloads and shapes"
+    );
+    println!("mixed: 8,000 warm parses, 0 allocations, 0 reallocations, 0 deallocations");
 }

@@ -23,6 +23,7 @@ CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0 \
 ```
 
 The Ryzen measurements below compare both versions on these same fixtures.
+The latest results include the [one-shot escaped-string comparison](#one-shot-escaped-strings-on-arbi-pc).
 
 ## Reader refill sizes
 
@@ -140,3 +141,155 @@ cargo bench --locked --bench parse_small -- 'small/ticker/rs_json_010::parse' \
 ```
 
 The 0.2 lane IDs are `rs_json::parse` and `rs_json::Parser(reuse)`.
+
+## Compact DOM tuning on arbi-pc
+
+On the merged PR #3 parser (`06cf6da`), a Linux CPU-time sampler collected
+530 instruction-pointer samples during eight million reused parses of the four
+fixtures. The slice lexer's `next_token` accounted for 45.1%, the grammar's
+`step` for 28.9%, and the DOM tape builder for 17.9%.
+
+The tuned build (`63e485f`) writes compact UTF-8 documents up to 4 KiB
+directly to the tape. Open containers temporarily store their parent index in
+the tape. Short owned documents can hold packed nodes inline. Other inputs use
+the general grammar, which also supplies the error kind and byte position when
+the compact path declines an input.
+
+A reusable parser can retain token boundaries for inputs up to 512 bytes.
+After two successful parses of the same length it can validate a subsequent
+input against byte ranges for syntax, string bodies, number digits and Unicode
+escapes. It checks every byte on a match and returns a view of the current
+input. A mismatch takes the regular parsing path. The one-shot API builds each
+document independently.
+
+All timings below come from Rust 1.100.0 on the Ryzen 9 9950X3D2 under
+WSL2. The benchmark used logical CPU 21, nice 15, a 25 ms quota per 100 ms,
+a 1 GiB cgroup memory limit and one Cargo build job. The guard pauses work
+at 35% host or guest CPU or a guest one-minute load of 7.7 and requires
+three low samples before starting or resuming. Criterion used the same
+one-second warmup, 20 samples over eight seconds and 10,000 bootstrap resamples
+as the preceding run. Timings are wall-clock regression slopes under the quota.
+Speedup divides the freshly measured 0.1.0 time by the 0.2 time in the same build.
+
+### Default x86-64
+
+| Input | 0.1.0 ns/doc | 0.2 one-shot ns/doc | One-shot speedup | 0.2 reuse ns/doc | Reuse speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 120.0 | 48.8 | 2.46× | 28.4 | 4.22× |
+| `ticker` | 770.6 | 285.0 | 2.70× | 45.8 | 16.82× |
+| `escaped` | 226.5 | 130.6 | 1.74× | 34.5 | 6.57× |
+| `nested` | 1538.7 | 460.3 | 3.34× | 45.2 | 34.02× |
+
+### Native Ryzen
+
+| Input | 0.1.0 ns/doc | 0.2 one-shot ns/doc | One-shot speedup | 0.2 reuse ns/doc | Reuse speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 143.5 | 48.5 | 2.96× | 29.8 | 4.82× |
+| `ticker` | 760.3 | 288.9 | 2.63× | 54.3 | 14.01× |
+| `escaped` | 212.4 | 130.3 | 1.63× | 33.0 | 6.43× |
+| `nested` | 1520.0 | 500.8 | 3.03× | 55.0 | 27.62× |
+
+### Different inputs on successive calls
+
+The first four controls alternate distinct input buffers of the same length.
+They change keys, numbers, strings or escaped Unicode characters while keeping
+token boundaries stable. The final control cycles all four original documents
+through one parser, changing the layout on every call. Each value below is per
+document (two or four documents per measured iteration).
+
+| Workload | 0.1.0 default ns | 0.2 reuse default ns | Speedup | 0.1.0 native ns | 0.2 reuse native ns | Speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `tiny_ok` | 121.8 | 33.7 | 3.62× | 120.7 | 36.3 | 3.32× |
+| `ticker` | 787.2 | 45.3 | 17.38× | 854.9 | 54.3 | 15.75× |
+| `escaped` | 218.6 | 35.3 | 6.19× | 214.5 | 42.3 | 5.07× |
+| `nested` | 1540.9 | 46.2 | 33.38× | 1524.4 | 55.2 | 27.59× |
+| `mixed_shapes` | 664.8 | 226.5 | 2.93× | 685.0 | 230.1 | 2.98× |
+
+### Allocation and speed targets
+
+A fresh reusable parser made three allocation calls on its first parse of each
+fixture. Each subsequent 1,000-parse run had zero allocations, reallocations and
+deallocations. The mixed test also recorded zero heap operations over 8,000 calls
+after warming the parser on the four input sizes.
+
+The reused parser passed the 2× target on every fixed fixture in both builds and
+on each alternating-payload control. With a new owned document on each call,
+three fixtures passed in each build. At that revision, one-shot escaped strings
+measured 1.74× default and 1.63× native.
+
+The existing `small` benchmark IDs are unchanged. To reproduce the controls,
+run the following command under the same CPU guard. Repeat the run with
+`RUSTFLAGS="-C target-cpu=native"`.
+
+```sh
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0 \
+  cargo bench --locked --bench parse_small -- 'rotating/' \
+  --warm-up-time 1 --measurement-time 8 --sample-size 20 --nresamples 10000 --noplot
+```
+
+
+The same host passed formatting, strict all-target Clippy, all-feature and
+no-default-feature tests, bench compilation, and all 318 pinned JSONTestSuite
+cases. Differential tests checked the optimized tapes against the byte parser,
+including changed fields, depth-limit changes, malformed inputs and UTF-16
+surrogate boundaries.
+
+## One-shot escaped strings on arbi-pc
+
+On 64-bit targets with the `simd` feature, commit `dace0a1` indexes the string
+boundaries in a compact object with one or two string values using a 64-bit mask. It
+validates escape sequences and UTF-16 surrogate pairs before returning the inline
+tape. Every one-shot call starts from its input. The reused parser follows the same
+implementation as in `b154383`.
+
+All four fixtures ran again on the Ryzen 9 with Rust 1.100.0. The published 0.1.0
+baseline ran in the candidate executable. Separate executables built from the previous
+PR head (`b154383`) and the candidate used the same locked dependencies, features,
+optimization settings and target flags. Adjacent measurements compared the two 0.2
+executables, alternating their order across fixtures and builds.
+
+| Build | Input | 0.1.0 ns | Prior one-shot ns | New one-shot ns | One-shot vs 0.1.0 | Prior reuse ns | New reuse ns | Reuse vs 0.1.0 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | `tiny_ok` | 123.9 | 47.8 | 47.4 | 2.61× | 28.4 | 28.5 | 4.35× |
+| default | `ticker` | 770.3 | 280.4 | 285.8 | 2.69× | 45.3 | 45.2 | 17.05× |
+| default | `escaped` | 212.8 | 128.6 | 66.6 | 3.19× | 34.2 | 34.4 | 6.19× |
+| default | `nested` | 1517.6 | 453.8 | 451.1 | 3.36× | 44.8 | 44.9 | 33.83× |
+| native | `tiny_ok` | 121.3 | 47.8 | 47.7 | 2.54× | 30.0 | 29.9 | 4.06× |
+| native | `ticker` | 761.8 | 289.3 | 290.7 | 2.62× | 53.9 | 54.1 | 14.09× |
+| native | `escaped` | 215.4 | 132.7 | 68.7 | 3.14× | 33.2 | 33.4 | 6.45× |
+| native | `nested` | 1495.1 | 493.8 | 493.6 | 3.03× | 54.6 | 55.4 | 26.99× |
+
+The one-shot escaped fixture took 48% less time than the previous PR head in each
+build. For the other three one-shot fixtures and every reused-parser fixture, point
+estimates differed by less than 2% and the paired runs had overlapping 95% slope
+intervals.
+
+Each entry is a Criterion slope in wall-clock nanoseconds per document. Each lane used
+a one-second warmup, 20 samples over eight seconds and 10,000 bootstrap resamples. The
+guard limited builds and benchmarks to 25% of one logical core (CPU 21), nice 15,
+one build job and 1 GiB of memory. It restarts an interrupted timing from warmup
+after three consecutive readings with Windows and WSL CPU utilization both below 35%
+and guest one-minute load below 7.7. Default and `-C target-cpu=native` used the
+same guard and benchmark inputs.
+
+### Changing inputs and allocations
+
+The first four controls alternate different payloads with the same token boundaries.
+The last rotates through all four document shapes. The table gives reused-parser
+speedup over published 0.1.0.
+
+| Control | Default | Native |
+| --- | ---: | ---: |
+| `tiny_ok` | 3.55× | 3.39× |
+| `ticker` | 17.39× | 14.29× |
+| `escaped` | 6.15× | 6.26× |
+| `nested` | 32.64× | 27.52× |
+| `mixed_shapes` | 2.89× | 2.93× |
+
+In each build, all four fixtures recorded zero allocations, reallocations or
+deallocations over 1,000 parses per fixture after warmup. The 8,000-parse mixed
+sequence also recorded zero heap operations.
+
+To repeat the fixed-input lanes, use the `small/<fixture>/<lane>` exact-filter command
+above. Compare a checkout of `b154383` with `dace0a1` using separate Criterion output
+directories and repeat the rotating controls with the same build settings.
