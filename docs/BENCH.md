@@ -23,6 +23,7 @@ CARGO_BUILD_JOBS=1 CARGO_PROFILE_BENCH_LTO=false CARGO_PROFILE_BENCH_DEBUG=0 \
 ```
 
 The Ryzen measurements below compare both versions on these same fixtures.
+The latest results include the [one-shot escaped-string comparison](#one-shot-escaped-strings-on-arbi-pc).
 
 ## Reader refill sizes
 
@@ -213,8 +214,8 @@ after warming the parser on the four input sizes.
 
 The reused parser passed the 2× target on every fixed fixture in both builds and
 on each alternating-payload control. With a new owned document on each call,
-three fixtures passed in each build. One-shot escaped strings remain below
-target at 1.74× default and 1.63× native.
+three fixtures passed in each build. At that revision, one-shot escaped strings
+measured 1.74× default and 1.63× native.
 
 The existing `small` benchmark IDs are unchanged. To reproduce the controls,
 run the following command under the same CPU guard. Repeat the run with
@@ -232,3 +233,63 @@ no-default-feature tests, bench compilation, and all 318 pinned JSONTestSuite
 cases. Differential tests checked the optimized tapes against the byte parser,
 including changed fields, depth-limit changes, malformed inputs and UTF-16
 surrogate boundaries.
+
+## One-shot escaped strings on arbi-pc
+
+On 64-bit targets with the `simd` feature, commit `dace0a1` indexes the string
+boundaries in a compact object with one or two string values using a 64-bit mask. It
+validates escape sequences and UTF-16 surrogate pairs before returning the inline
+tape. Every one-shot call starts from its input. The reused parser follows the same
+implementation as in `b154383`.
+
+All four fixtures ran again on the Ryzen 9 with Rust 1.100.0. The published 0.1.0
+baseline ran in the candidate executable. Separate executables built from the previous
+PR head (`b154383`) and the candidate used the same locked dependencies, features,
+optimization settings and target flags. Adjacent measurements compared the two 0.2
+executables, alternating their order across fixtures and builds.
+
+| Build | Input | 0.1.0 ns | Prior one-shot ns | New one-shot ns | One-shot vs 0.1.0 | Prior reuse ns | New reuse ns | Reuse vs 0.1.0 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | `tiny_ok` | 123.9 | 47.8 | 47.4 | 2.61× | 28.4 | 28.5 | 4.35× |
+| default | `ticker` | 770.3 | 280.4 | 285.8 | 2.69× | 45.3 | 45.2 | 17.05× |
+| default | `escaped` | 212.8 | 128.6 | 66.6 | 3.19× | 34.2 | 34.4 | 6.19× |
+| default | `nested` | 1517.6 | 453.8 | 451.1 | 3.36× | 44.8 | 44.9 | 33.83× |
+| native | `tiny_ok` | 121.3 | 47.8 | 47.7 | 2.54× | 30.0 | 29.9 | 4.06× |
+| native | `ticker` | 761.8 | 289.3 | 290.7 | 2.62× | 53.9 | 54.1 | 14.09× |
+| native | `escaped` | 215.4 | 132.7 | 68.7 | 3.14× | 33.2 | 33.4 | 6.45× |
+| native | `nested` | 1495.1 | 493.8 | 493.6 | 3.03× | 54.6 | 55.4 | 26.99× |
+
+The one-shot escaped fixture took 48% less time than the previous PR head in each
+build. For the other three one-shot fixtures and every reused-parser fixture, point
+estimates differed by less than 2% and the paired runs had overlapping 95% slope
+intervals.
+
+Each entry is a Criterion slope in wall-clock nanoseconds per document. Each lane used
+a one-second warmup, 20 samples over eight seconds and 10,000 bootstrap resamples. The
+guard limited builds and benchmarks to 25% of one logical core (CPU 21), nice 15,
+one build job and 1 GiB of memory. It restarts an interrupted timing from warmup
+after three consecutive readings with Windows and WSL CPU utilization both below 35%
+and guest one-minute load below 7.7. Default and `-C target-cpu=native` used the
+same guard and benchmark inputs.
+
+### Changing inputs and allocations
+
+The first four controls alternate different payloads with the same token boundaries.
+The last rotates through all four document shapes. The table gives reused-parser
+speedup over published 0.1.0.
+
+| Control | Default | Native |
+| --- | ---: | ---: |
+| `tiny_ok` | 3.55× | 3.39× |
+| `ticker` | 17.39× | 14.29× |
+| `escaped` | 6.15× | 6.26× |
+| `nested` | 32.64× | 27.52× |
+| `mixed_shapes` | 2.89× | 2.93× |
+
+In each build, all four fixtures recorded zero allocations, reallocations or
+deallocations over 1,000 parses per fixture after warmup. The 8,000-parse mixed
+sequence also recorded zero heap operations.
+
+To repeat the fixed-input lanes, use the `small/<fixture>/<lane>` exact-filter command
+above. Compare a checkout of `b154383` with `dace0a1` using separate Criterion output
+directories and repeat the rotating controls with the same build settings.
