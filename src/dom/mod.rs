@@ -13,9 +13,11 @@ mod value;
 pub use tape::{Node, NodeTag};
 pub use value::{ArrayIter, Key, ObjectIter, Value, ValueKind};
 
-use crate::config::Limits;
-use crate::stack::NestStack;
 use crate::Error;
+use crate::ErrorKind;
+use crate::config::Limits;
+use crate::lex::{Lexer, slice::SliceLexer};
+use crate::stream::{Event, Grammar};
 use alloc::vec::Vec;
 
 /// Parsed document borrowing the source text.
@@ -31,10 +33,23 @@ impl<'a> Document<'a> {
     /// # Errors
     /// Invalid JSON or exceeded limits.
     pub fn parse_with(src: &'a [u8], limits: Limits, trusted_utf8: bool) -> Result<Self, Error> {
+        Self::from_lexer(src, limits, SliceLexer::new(src, trusted_utf8))
+    }
+
+    pub(crate) fn from_lexer(
+        src: &'a [u8],
+        limits: Limits,
+        lexer: SliceLexer<'a>,
+    ) -> Result<Self, Error> {
         let mut tape = Vec::new();
-        let mut stack = NestStack::new();
-        let mut open = Vec::new();
-        build(src, limits, trusted_utf8, &mut tape, &mut stack, &mut open)?;
+        build(
+            src,
+            limits,
+            lexer,
+            &mut tape,
+            &mut Grammar::default(),
+            &mut Vec::new(),
+        )?;
         Ok(Self { src, tape })
     }
 
@@ -55,7 +70,7 @@ impl<'a> Document<'a> {
 #[derive(Debug, Default)]
 pub struct Parser {
     tape: Vec<Node>,
-    stack: NestStack,
+    grammar: Grammar,
     open: Vec<u32>,
     /// Limits applied to every parse.
     pub limits: Limits,
@@ -74,10 +89,20 @@ impl Parser {
     /// Invalid JSON or exceeded limits.
     pub fn parse<'p, 'a>(&'p mut self, src: &'a str) -> Result<DocRef<'p, 'a>, Error> {
         self.tape.clear();
-        self.stack.clear();
+        self.grammar.clear();
         self.open.clear();
-        build(src.as_bytes(), self.limits, true, &mut self.tape, &mut self.stack, &mut self.open)?;
-        Ok(DocRef { src: src.as_bytes(), tape: &self.tape })
+        build(
+            src.as_bytes(),
+            self.limits,
+            SliceLexer::from_str(src),
+            &mut self.tape,
+            &mut self.grammar,
+            &mut self.open,
+        )?;
+        Ok(DocRef {
+            src: src.as_bytes(),
+            tape: &self.tape,
+        })
     }
 }
 
@@ -90,29 +115,67 @@ pub struct DocRef<'p, 'a> {
     pub tape: &'p [Node],
 }
 
-/// Iterative tape builder shared by `Document` and `Parser`.
-///
-/// Algorithm:
-/// 1. `tape.reserve(estimate(src.len()))` — start with `len / 8`, tune.
-/// 2. Drive `SliceLexer`; on `{`/`[` push `Node::open` and its tape index on
-///    `open`, push frame on `stack` (→ `DepthLimit`).
-/// 3. Scalars push one node (`start`, `len`, escaped flag).
-/// 4. On `}`/`]` pop, patch the open node's `count` and `end` (index past
-///    subtree).
-/// 5. A tiny state enum (ExpectValue / ExpectKey / ExpectColon /
-///    ExpectCommaOrEnd) enforces grammar without recursion.
-/// 6. After root: only whitespace allowed (`TrailingCharacters`).
+/// Store the shared grammar's events as a flat tape. Only accepted containers
+/// enter the open-index stack; a rejected opener cannot allocate a tape node.
 fn build(
     src: &[u8],
     limits: Limits,
-    trusted_utf8: bool,
+    mut lexer: SliceLexer<'_>,
     tape: &mut Vec<Node>,
-    stack: &mut NestStack,
+    grammar: &mut Grammar,
     open: &mut Vec<u32>,
 ) -> Result<(), Error> {
-    if src.len() as u64 > limits.max_document_bytes {
-        return Err(Error::at(src, 0, crate::ErrorKind::SizeLimit));
+    if src.len() as u64 > limits.max_document_bytes.min(u64::from(u32::MAX)) {
+        return Err(Error::at(src, 0, ErrorKind::SizeLimit));
     }
-    let _ = (trusted_utf8, tape, stack, open);
-    todo!("agent: iterative tape builder")
+    loop {
+        let event = grammar.next(&mut lexer, limits.max_depth, false)?;
+        let span = lexer.span();
+        // At most one node per input byte, and the document fits u32 offsets.
+        let index = u32::try_from(tape.len())
+            .map_err(|_| Error::at(src, lexer.offset(), ErrorKind::SizeLimit))?;
+        let start = u32::try_from(span.start)
+            .map_err(|_| Error::at(src, lexer.offset(), ErrorKind::SizeLimit))?;
+        let node = match event {
+            Event::End => continue,
+            Event::Eof => return Ok(()),
+            Event::ArrayEnd | Event::ObjectEnd => {
+                let id = open.pop().expect("grammar closed an open container");
+                tape.get_mut(id as usize)
+                    .expect("open index names a tape node")
+                    .c = index;
+                continue;
+            }
+            Event::ArrayStart => Node::open(NodeTag::Arr, start),
+            Event::ObjectStart => Node::open(NodeTag::Obj, start),
+            Event::Key { escaped } | Event::Str { escaped } => Node::scalar(
+                NodeTag::Str,
+                start,
+                span.len,
+                if escaped { Node::ESCAPED } else { 0 },
+            ),
+            Event::Num => Node::scalar(
+                NodeTag::Num,
+                start,
+                span.len,
+                if lexer.number_is_integer() {
+                    Node::NUM_INT
+                } else {
+                    0
+                },
+            ),
+            Event::Bool(true) => Node::scalar(NodeTag::True, start, span.len, 0),
+            Event::Bool(false) => Node::scalar(NodeTag::False, start, span.len, 0),
+            Event::Null => Node::scalar(NodeTag::Null, start, span.len, 0),
+        };
+        if !matches!(event, Event::Key { .. })
+            && let Some(&id) = open.last()
+        {
+            tape.get_mut(id as usize).expect("parent is on the tape").b += 1;
+        }
+        if matches!(event, Event::ArrayStart | Event::ObjectStart) {
+            open.push(index);
+        }
+        tape.push(node);
+    }
 }

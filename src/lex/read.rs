@@ -12,8 +12,8 @@
 //!   for concatenated-JSON protocols).
 
 use super::{Lexer, Span, Token};
-use crate::config::{BufConfig, Limits};
 use crate::Error;
+use crate::config::{BufConfig, Limits};
 use alloc::{boxed::Box, vec::Vec};
 use std::io::Read;
 
@@ -51,7 +51,11 @@ impl<R: Read> ReadLexer<R> {
 
     /// Recover the reader plus any unread buffered bytes.
     pub fn into_inner(self) -> (R, Vec<u8>) {
-        let rest = self.buf.get(self.head..self.tail).unwrap_or_default().to_vec();
+        let rest = self
+            .buf
+            .get(self.head..self.tail)
+            .unwrap_or_default()
+            .to_vec();
         (self.reader, rest)
     }
 
@@ -76,7 +80,9 @@ impl<R: Read> Lexer for ReadLexer<R> {
             &self.spill
         } else {
             let s = usize::try_from(self.span.start - self.consumed).unwrap_or(0);
-            self.buf.get(s..s + self.span.len as usize).unwrap_or_default()
+            self.buf
+                .get(s..s + self.span.len as usize)
+                .unwrap_or_default()
         }
     }
 }

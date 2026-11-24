@@ -19,12 +19,12 @@ trait ByteVec: Copy {
 impl ByteVec for u8x16 {
     const N: usize = 16;
 
-    #[inline(always)]
+    #[inline]
     fn load(chunk: &[u8]) -> Option<Self> {
         Some(Self::new(chunk.get(..16)?.try_into().ok()?))
     }
 
-    #[inline(always)]
+    #[inline]
     fn interesting(self) -> u32 {
         let q = self.simd_eq(Self::splat(b'"'));
         let b = self.simd_eq(Self::splat(b'\\'));
@@ -34,7 +34,7 @@ impl ByteVec for u8x16 {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn run_end<V: ByteVec>(buf: &[u8], mut i: usize) -> usize {
     while let Some(v) = buf.get(i..).and_then(V::load) {
         let bits = v.interesting();

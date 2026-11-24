@@ -1,6 +1,6 @@
 //! Large-file paths: read-to-Vec vs mmap vs buffered streaming, and the
 //! read-buffer sweep (8/16/64/256 KiB). Report MB/s *and* peak RSS
-//! (`/usr/bin/time -v` or the counting allocator in tests/alloc_count.rs).
+//! (`/usr/bin/time -v` or the counting allocator in `tests/alloc_count.rs`).
 //! Generate inputs with `scripts/gen-large.sh` (256 MB and 1 GB arrays + NDJSON).
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};

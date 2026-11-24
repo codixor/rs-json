@@ -1,25 +1,31 @@
-# rs-json 0.2 skeleton
+# rs-json 0.2 development
 
-This branch stages the proposed 0.2 API and development plan. Several parser entry points are placeholders. The [main branch](https://github.com/codixor/rs-json/tree/main) contains the working 0.1 crate. The supplied workflow is staged for review in [docs/ci-draft.yml](docs/ci-draft.yml).
+The slice parser builds a flat tape with 16-byte nodes. `parse` accepts a string,
+`parse_bytes` accepts UTF-8 bytes, and `Parser::parse` reuses its buffers across
+documents. A slice-backed `PullParser` exposes the same grammar as a stream of
+events. The published 0.1 API is on [main](https://github.com/codixor/rs-json/tree/main).
 
-Zero-copy JSON for Rust 1.100+, one lexer core for every input size:
+### Nesting limit
 
-- **Tape DOM** — `rs_json::parse(&str)` / reusable `Parser` (zero
-  allocations per document after warm-up), 16-byte nodes, O(1) subtree skip.
-- **Streaming** — `PullParser` over a slice or any `io::Read` with a fixed
-  buffer; constant memory on multi-GB files; `skip_value` and streaming JSON
-  Pointer selection.
-- **Files** — `input::parse_file` picks read-to-buffer, mmap or streaming
-  by size. NDJSON helper.
-- Strings stay borrowed unless they contain escapes; numbers convert on
-  access. SIMD string scanning via `wide` (SSE2/AVX2/NEON/simd128), SWAR and
-  scalar fallbacks, no input padding, `no_std + alloc`.
+Each open array or object counts as one level, including an empty container.
+Scalars have depth zero. The default allows 512 levels. On the first opener
+that exceeds the limit, parsing returns `ErrorKind::DepthLimit` at its byte
+offset. Skipping a value applies the same check.
 
 ```rust
-let doc = rs_json::parse(r#"{"s":"BTCUSDT","p":"94210.10","q":[1,2,3]}"#)?;
-let root = doc.root();
-assert_eq!(root.get("s").unwrap().as_str().unwrap(), "BTCUSDT");
+use rs_json::{ErrorKind, Parser};
+
+let mut parser = Parser::new();
+parser.limits.max_depth = 1;
+assert!(parser.parse("[1, 2]").is_ok());
+let error = parser.parse("[{}]").unwrap_err();
+assert_eq!(error.kind, ErrorKind::DepthLimit);
+assert_eq!(error.offset(), 1);
 ```
+
+The following features and performance targets are described in the
+[0.2 roadmap](docs/PLAN.md). Buffered reader parsing, file mapping and
+the higher-level compatibility features are still in development.
 
 | Feature | Default | Adds |
 |---------|---------|------|
@@ -32,7 +38,6 @@ assert_eq!(root.get("s").unwrap().as_str().unwrap(), "BTCUSDT");
 | `serde` / `ld` | | serde_json facade / JSON-LD + Google builders |
 | `legacy` | | old `JsonItem` API shim |
 
-Status: 0.2 skeleton — see `docs/PLAN.md`. Design rationale and review of
-the previous version: `docs/ANALYSIS.md`.
+See [the parser analysis](docs/ANALYSIS.md) for the design rationale.
 
 License: MIT OR Apache-2.0.

@@ -6,7 +6,7 @@
 //! |-------|-------------|----------|
 //! | Tape DOM | [`parse`], [`Parser::parse`] | whole document in memory, random access |
 //! | Pull stream | [`stream::PullParser`] | huge or unbounded input, bounded memory |
-//! | File helper | [`input::parse_file`] | picks read-to-buffer vs mmap vs streaming by size |
+//! | File helper | `input::parse_file` | picks read-to-buffer vs mmap vs streaming by size |
 //!
 //! Work is deferred: strings are not unescaped and numbers are not converted
 //! until a caller asks, and every string token carries an `escaped` flag so
@@ -52,7 +52,11 @@ pub use crate::error::{Error, ErrorKind, Pos};
 /// # Errors
 /// Returns [`Error`] for invalid JSON or when a [`Limits`] bound is exceeded.
 pub fn parse(src: &str) -> Result<Document<'_>, Error> {
-    Document::parse_with(src.as_bytes(), Limits::default(), true)
+    Document::from_lexer(
+        src.as_bytes(),
+        Limits::default(),
+        lex::slice::SliceLexer::from_str(src),
+    )
 }
 
 /// Parse UTF-8 bytes. String contents are UTF-8 validated with `simdutf8`
