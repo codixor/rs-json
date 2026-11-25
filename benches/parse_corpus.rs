@@ -30,10 +30,21 @@ fn bench(c: &mut Criterion) {
         let mut g = c.benchmark_group(format!("corpus/{file}"));
         g.throughput(Throughput::Bytes(text.len() as u64));
         g.sample_size(30);
+        // The generated 16 MiB fixture includes a final record beyond the default cap.
+        let defaults = rs_json::Limits::default();
+        let limits = rs_json::Limits {
+            max_document_bytes: defaults.max_document_bytes.max(text.len() as u64),
+            ..defaults
+        };
         g.bench_function("rs_json::parse", |b| {
-            b.iter(|| rs_json::parse(black_box(&text)).unwrap());
+            if limits == defaults {
+                b.iter(|| rs_json::parse(black_box(&text)).unwrap());
+            } else {
+                b.iter(|| rs_json::parse_with_limits(black_box(&text), limits).unwrap());
+            }
         });
         let mut parser = rs_json::Parser::new();
+        parser.limits = limits;
         g.bench_function("rs_json::Parser(reuse)", |b| {
             b.iter(|| {
                 black_box(parser.parse(black_box(&text)).unwrap());
