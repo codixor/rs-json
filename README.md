@@ -110,6 +110,9 @@ their backend-specific return types. Use `FormatError::category(&error)` to
 include encoding and limit failures. Code matching `Serialize { message }` can
 now match `Serialize { category }`. The legacy extract accessors return `None`.
 
+The [0.4 benchmark results](docs/BENCH.md#04-shared-limits-on-arbi-pc) compare the
+limited native slice parser with 0.3.0 on eight fixtures.
+
 The [0.2.0 benchmark report](https://github.com/codixor/rs-json/blob/v0.2.0/docs/BENCH.md)
 includes one-shot and reused parser results, reader peak RSS and corpus comparisons.
 
