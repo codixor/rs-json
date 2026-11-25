@@ -1,5 +1,10 @@
 # 0.2 slice parser measurements
 
+The tables and reproduction commands below use the [historical v0.2 harness](https://github.com/codixor/rs-json/tree/v0.2.0/benches) and its [0.1.0 comparison results](https://github.com/codixor/rs-json/blob/v0.2.0/docs/BENCH.md). Starting in
+0.4, the published benchmark dependency is rs-json 0.3.0 and its Criterion
+lane is `rs_json_030::parse`. The generated mixed fixture measures 16,804,466
+bytes. The 0.4 corpus harness permits that exact document size.
+
 The [corpus benchmarks](#corpus-benchmarks-on-arbi-pc) compare seven operations on
 four in-memory documents in default and native Ryzen builds.
 

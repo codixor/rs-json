@@ -50,8 +50,8 @@ fn bench(c: &mut Criterion) {
                 black_box(parser.parse(black_box(&text)).unwrap());
             });
         });
-        g.bench_function("rs_json_010::parse", |b| {
-            b.iter(|| rs_json_010::parse(black_box(&text)).unwrap());
+        g.bench_function("rs_json_030::parse", |b| {
+            b.iter(|| rs_json_030::parse(black_box(&text)).unwrap());
         });
         g.bench_function("serde_json::Value", |b| {
             b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(&text)).unwrap());

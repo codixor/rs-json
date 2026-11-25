@@ -46,7 +46,7 @@ serde_json = { version = "1.0.154", default-features = false, features = ["std",
 
 [dev-dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
-rs-json-010 = { package = "rs-json", version = "=0.1.0" }
+rs-json-030 = { package = "rs-json", version = "=0.3.0" }
 stats_alloc = "0.1.10"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports"] }
 proptest = "1.12.0"
