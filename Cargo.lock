@@ -794,15 +794,15 @@ dependencies = [
 
 [[package]]
 name = "rs-json"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bufjson",
  "criterion",
  "memchr",
- "memmap2",
  "pretty_assertions",
  "proptest",
  "rs-json 0.1.0",
+ "rs-mmap",
  "serde",
  "serde_json",
  "simd-json",
@@ -811,6 +811,17 @@ dependencies = [
  "stats_alloc",
  "thiserror",
  "wide",
+]
+
+[[package]]
+name = "rs-mmap"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330bdbfd01c22aecc5cdd5950e025d5e0eb69491350b1fdcbfbd06dcf9035565"
+dependencies = [
+ "memmap2",
+ "thiserror",
+ "windows-sys",
 ]
 
 [[package]]

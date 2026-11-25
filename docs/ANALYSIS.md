@@ -118,7 +118,7 @@ allocation and per-token overhead, not scanning:
 | memchr | (rejected) | 2.8.3 (optional, `ndjson` only) |
 | wide | — | 1.7.1 (optional, `simd`) |
 | simdutf8 | — | 0.1.5 |
-| memmap2 | — | 0.9.12 (optional, `mmap`) |
+| rs-mmap | — | 0.4.0 (optional, `mmap`; re-exports native memmap2 types) |
 | tokio | — | 1.54.1 (optional, `async`) |
 | bufjson (dev, comparator) | — | 1.3.0 |
 | proptest (dev) | — | 1.12.0 |

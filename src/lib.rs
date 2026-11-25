@@ -31,7 +31,7 @@ pub mod unescape;
 pub mod ndjson;
 
 #[cfg(feature = "serde")]
-/// Typed serialization and deserialization through Serde.
+/// Typed serialization and deserialization delegated to `serde_json`.
 pub mod serde_codec;
 
 #[cfg(feature = "ld")]
@@ -50,8 +50,9 @@ pub use crate::ld::{JsonLdArray, JsonLdDocument, JsonLdObject};
 #[cfg(feature = "serde")]
 #[doc(inline)]
 pub use crate::serde_codec::{
-    JsonSerdeError, JsonSerdeResult, JsonValue, from_reader, from_slice, from_str, from_value,
-    to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer, to_writer_pretty,
+    JsonSerdeCategory, JsonSerdeError, JsonSerdeResult, JsonValue, from_reader, from_slice,
+    from_str, from_value, to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer,
+    to_writer_pretty,
 };
 
 pub use crate::config::Limits;

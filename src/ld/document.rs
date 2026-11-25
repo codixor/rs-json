@@ -1,4 +1,4 @@
-use crate::{JsonLdArray, JsonLdObject, JsonSerdeError, JsonSerdeResult, JsonValue};
+use crate::{JsonLdArray, JsonLdObject, JsonSerdeResult, JsonValue};
 
 /// Top-level JSON-LD document builder.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -96,11 +96,7 @@ impl JsonLdDocument {
     /// Returns a serialization error if the inner JSON value cannot be
     /// rendered.
     pub fn to_json_string(&self) -> JsonSerdeResult<String> {
-        serde_json::to_string(&self.to_canonical_value()).map_err(|error| {
-            JsonSerdeError::Serialize {
-                message: error.to_string(),
-            }
-        })
+        crate::to_string(&self.to_canonical_value())
     }
 
     /// Serializes the document to pretty JSON.
@@ -110,11 +106,7 @@ impl JsonLdDocument {
     /// Returns a serialization error if the inner JSON value cannot be
     /// rendered.
     pub fn to_json_string_pretty(&self) -> JsonSerdeResult<String> {
-        serde_json::to_string_pretty(&self.to_canonical_value()).map_err(|error| {
-            JsonSerdeError::Serialize {
-                message: error.to_string(),
-            }
-        })
+        crate::to_string_pretty(&self.to_canonical_value())
     }
 
     /// Wraps the compact JSON-LD payload in a `<script>` tag.
