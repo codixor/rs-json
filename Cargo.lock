@@ -782,26 +782,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "rs-json"
+name = "rs-format"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "076bf3544b48dfd54dceb6cf5550f6dffa783236bd676798258549b945d12c38"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
-]
+checksum = "0923a90fc8c06ff3e4e3b8b96b2b738ed3019c9d8a6b9ea0ce259f17fa68dc38"
 
 [[package]]
 name = "rs-json"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8e3683319195fc7417f4c08d0091cf289270f406bfec8e2d43ab32a89ec73ff"
+dependencies = [
+ "memchr",
+ "simdutf8",
+ "thiserror",
+ "wide",
+]
+
+[[package]]
+name = "rs-json"
+version = "0.4.0"
 dependencies = [
  "bufjson",
  "criterion",
  "memchr",
  "pretty_assertions",
  "proptest",
- "rs-json 0.1.0",
+ "rs-format",
+ "rs-json 0.3.0",
  "rs-mmap",
  "serde",
  "serde_json",

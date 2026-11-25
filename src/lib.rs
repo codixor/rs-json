@@ -50,14 +50,15 @@ pub use crate::ld::{JsonLdArray, JsonLdDocument, JsonLdObject};
 #[cfg(feature = "serde")]
 #[doc(inline)]
 pub use crate::serde_codec::{
-    JsonSerdeCategory, JsonSerdeError, JsonSerdeResult, JsonValue, from_reader, from_slice,
-    from_str, from_value, to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer,
+    JsonSerdeCategory, JsonSerdeError, JsonSerdeResult, JsonValue, from_reader,
+    from_reader_with_limits, from_slice, from_slice_with_limits, from_str, from_str_with_limits,
+    from_value, to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer,
     to_writer_pretty,
 };
 
-pub use crate::config::Limits;
 pub use crate::dom::{Document, Parser, Value, ValueKind};
 pub use crate::error::{Error, ErrorKind, Pos};
+pub use rs_format::{Category, FormatError, Limits, Position};
 
 /// Parse a complete JSON text into a borrowed tape [`Document`].
 ///
@@ -78,4 +79,24 @@ pub fn parse(src: &str) -> Result<Document<'_>, Error> {
 /// Returns [`Error`] for invalid JSON, invalid UTF-8, or exceeded limits.
 pub fn parse_bytes(src: &[u8]) -> Result<Document<'_>, Error> {
     Document::parse_with(src, Limits::default(), false)
+}
+
+/// Parse a string with inclusive shared resource limits.
+///
+/// # Errors
+/// Returns a native diagnostic for invalid JSON or exceeded limits.
+pub fn parse_with_limits(src: &str, limits: Limits) -> Result<Document<'_>, Error> {
+    Document::from_lexer(
+        src.as_bytes(),
+        limits,
+        lex::slice::SliceLexer::from_str(src),
+    )
+}
+
+/// Parse a byte slice with inclusive shared resource limits.
+///
+/// # Errors
+/// Returns a native diagnostic for invalid JSON, invalid UTF-8 or exceeded limits.
+pub fn parse_bytes_with_limits(src: &[u8], limits: Limits) -> Result<Document<'_>, Error> {
+    Document::parse_with(src, limits, false)
 }

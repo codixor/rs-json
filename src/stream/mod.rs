@@ -62,11 +62,13 @@ enum State {
 pub(crate) struct Grammar {
     stack: NestStack,
     state: State,
+    document_start: u64,
 }
 
 impl Grammar {
     pub(crate) fn clear(&mut self) {
         self.stack.clear();
+        self.document_start = 0;
         self.state = State::Value;
     }
 
@@ -165,7 +167,7 @@ impl Grammar {
     pub(crate) fn next<L: Lexer>(
         &mut self,
         lexer: &mut L,
-        max_depth: u32,
+        limits: Limits,
         multi: bool,
     ) -> Result<Event, Error> {
         if self.state == State::End {
@@ -173,9 +175,21 @@ impl Grammar {
             return Ok(Event::End);
         }
         loop {
-            let token = lexer.next_token()?;
-            match self.step(token, max_depth, multi) {
-                Ok(Some(event)) => return Ok(event),
+            let document_end = self
+                .document_start
+                .saturating_add(limits.max_document_bytes);
+            let token = lexer.next_token_bounded(document_end, limits.max_token_bytes)?;
+            match self.step(token, limits.max_depth, multi) {
+                Ok(Some(event)) => {
+                    if multi && self.state == State::End {
+                        let span = lexer.span();
+                        self.document_start = span
+                            .start
+                            .saturating_add(u64::from(span.len))
+                            .saturating_add(u64::from(matches!(token, Token::Str { .. })));
+                    }
+                    return Ok(event);
+                }
                 Ok(None) => {}
                 Err(kind) => {
                     let offset = lexer
@@ -230,7 +244,7 @@ impl<L: Lexer> PullParser<L> {
             return Err(error);
         }
         self.grammar
-            .next(&mut self.lexer, self.limits.max_depth, self.multi_document)
+            .next(&mut self.lexer, self.limits, self.multi_document)
             .inspect_err(|&error| self.error = Some(error))
     }
 

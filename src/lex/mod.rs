@@ -59,6 +59,42 @@ pub trait Lexer {
     /// # Errors
     /// Lexical errors (bad literal, bad escape, bad number, EOF in token).
     fn next_token(&mut self) -> Result<Token, crate::Error>;
+    /// Read a token within an absolute document end and a raw token-body limit.
+    /// Built-in lexers check before spilling or advancing beyond a bound.
+    /// Custom lexers that buffer tokens should override this method to bound
+    /// their storage before returning a token.
+    ///
+    /// # Errors
+    /// Returns a lexical error or a size limit at the first excess byte.
+    fn next_token_bounded(
+        &mut self,
+        document_end: u64,
+        max_token: usize,
+    ) -> Result<Token, crate::Error> {
+        let token = self.next_token()?;
+        let span = self.span();
+        let end = span
+            .start
+            .saturating_add(u64::from(span.len))
+            .saturating_add(u64::from(matches!(token, Token::Str { .. })));
+        let body = matches!(
+            token,
+            Token::Str { .. } | Token::Num | Token::True | Token::False | Token::Null
+        );
+        let limit = if body && span.len as usize > max_token {
+            document_end.min(span.start.saturating_add(max_token as u64))
+        } else {
+            document_end
+        };
+        if end > limit {
+            return Err(crate::Error {
+                kind: crate::ErrorKind::SizeLimit,
+                pos: self.position(limit),
+            });
+        }
+        Ok(token)
+    }
+
     /// Span of the token last returned.
     fn span(&self) -> Span;
     /// Raw content bytes of the last `Str`/`Num` token (escapes intact).

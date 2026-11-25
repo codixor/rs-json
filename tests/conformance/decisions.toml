@@ -1,5 +1,5 @@
 # JSON number syntax is independent of machine numeric ranges.
-# The default depth admits 500 levels. Strings require valid UTF-8 and paired
+# The shared default depth rejects 500 levels. Strings require valid UTF-8 and paired
 # surrogate escapes. A leading BOM is outside the accepted JSON grammar.
 [implementation_defined]
 "i_number_double_huge_neg_exp.json" = true
@@ -35,5 +35,5 @@
 "i_string_truncated-utf-8.json" = false
 "i_string_utf16BE_no_BOM.json" = false
 "i_string_utf16LE_no_BOM.json" = false
-"i_structure_500_nested_arrays.json" = true
+"i_structure_500_nested_arrays.json" = false
 "i_structure_UTF-8_BOM_empty_object.json" = false

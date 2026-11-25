@@ -43,7 +43,18 @@ impl FileDocument {
     /// # Errors
     /// Returns a parse error for invalid JSON, invalid UTF-8 or exceeded limits.
     pub fn document(&self) -> Result<crate::Document<'_>, crate::Error> {
-        crate::parse_bytes(self.bytes())
+        self.document_with_limits(crate::Limits::default())
+    }
+
+    /// Parse this existing snapshot using inclusive shared limits.
+    ///
+    /// # Errors
+    /// Returns a parse error for invalid JSON, invalid UTF-8 or exceeded limits.
+    pub fn document_with_limits(
+        &self,
+        limits: crate::Limits,
+    ) -> Result<crate::Document<'_>, crate::Error> {
+        crate::parse_bytes_with_limits(self.bytes(), limits)
     }
 }
 

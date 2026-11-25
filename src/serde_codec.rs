@@ -1,5 +1,8 @@
-use serde::Serialize;
+mod bounds;
+
+use crate::{Category, FormatError, Limits, Pos, Position};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io::{Read, Write};
 
@@ -18,9 +21,8 @@ pub type JsonValue = serde_json::Value;
 pub enum JsonSerdeError {
     /// Encoding failed.
     Serialize {
-        /// The crate supplies a fixed diagnostic. Manually constructed errors
-        /// display the message supplied by their caller.
-        message: String,
+        /// I/O for a failed writer, or Data for a value that cannot be encoded.
+        category: Category,
     },
     /// Decoding failed.
     Deserialize {
@@ -31,17 +33,21 @@ pub enum JsonSerdeError {
         /// Source column as reported by the codec. It can be zero at a line boundary.
         column: usize,
     },
+    /// Encoded input exceeded a configured parser bound.
+    Limit {
+        /// Location of the first excess byte or container.
+        pos: Pos,
+    },
 }
 
 impl JsonSerdeError {
     fn encode(error: &serde_json::Error) -> Self {
-        let message = if error.is_io() {
-            "I/O error while writing JSON"
-        } else {
-            "value could not be encoded"
-        };
         Self::Serialize {
-            message: message.to_owned(),
+            category: if error.is_io() {
+                Category::Io
+            } else {
+                Category::Data
+            },
         }
     }
 
@@ -53,11 +59,11 @@ impl JsonSerdeError {
         }
     }
 
-    /// The category of a decode failure. Encoding errors return `None`.
+    /// The category of a decode failure. Encoding and limit errors return `None`.
     pub fn category(&self) -> Option<JsonSerdeCategory> {
         match self {
             Self::Deserialize { category, .. } => Some(*category),
-            Self::Serialize { .. } => None,
+            Self::Serialize { .. } | Self::Limit { .. } => None,
         }
     }
 
@@ -65,6 +71,7 @@ impl JsonSerdeError {
     pub fn position(&self) -> Option<(usize, usize)> {
         match self {
             Self::Deserialize { line, column, .. } if *line != 0 => Some((*line, *column)),
+            Self::Limit { pos } => Some((pos.line as usize, pos.col as usize)),
             _ => None,
         }
     }
@@ -73,7 +80,12 @@ impl JsonSerdeError {
 impl fmt::Display for JsonSerdeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Serialize { message } => write!(f, "failed to serialize JSON: {message}"),
+            Self::Serialize { category } => write!(f, "failed to serialize JSON ({category:?})"),
+            Self::Limit { pos } => write!(
+                f,
+                "JSON limit exceeded at line {} column {} (byte {})",
+                pos.line, pos.col, pos.offset
+            ),
             Self::Deserialize { category, .. } => {
                 write!(f, "failed to deserialize JSON ({category:?})")?;
                 if let Some((line, column)) = self.position() {
@@ -86,6 +98,49 @@ impl fmt::Display for JsonSerdeError {
 }
 
 impl std::error::Error for JsonSerdeError {}
+
+impl FormatError for JsonSerdeError {
+    fn category(&self) -> Category {
+        match self {
+            Self::Serialize { category } => *category,
+            Self::Deserialize { category, .. } => match category {
+                JsonSerdeCategory::Io => Category::Io,
+                JsonSerdeCategory::Syntax => Category::Syntax,
+                JsonSerdeCategory::Data => Category::Data,
+                JsonSerdeCategory::Eof => Category::Eof,
+            },
+            Self::Limit { .. } => Category::Limit,
+        }
+    }
+
+    fn position(&self) -> Option<Position> {
+        if let Self::Limit { pos } = self {
+            return Some((*pos).into());
+        }
+        let (line, column) = self.position()?;
+        let position = Position {
+            offset: None,
+            line: u32::try_from(line)
+                .ok()
+                .and_then(core::num::NonZeroU32::new),
+            column: u32::try_from(column)
+                .ok()
+                .and_then(core::num::NonZeroU32::new),
+        };
+        (position.line.is_some() || position.column.is_some()).then_some(position)
+    }
+}
+
+// Every caller prechecks the source or wraps the reader with the same inclusive
+// depth ceiling. The backend's internal counter would reject the 128th opener.
+fn decode_bounded<'de, T: Deserialize<'de>, R: serde_json::de::Read<'de>>(
+    mut decoder: serde_json::Deserializer<R>,
+) -> Result<T, serde_json::Error> {
+    decoder.disable_recursion_limit();
+    let value = T::deserialize(&mut decoder)?;
+    decoder.end()?;
+    Ok(value)
+}
 
 /// Serialize a value to UTF-8 JSON bytes.
 ///
@@ -155,8 +210,21 @@ pub fn to_value<T: Serialize>(value: &T) -> JsonSerdeResult<JsonValue> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when decoding fails.
-pub fn from_slice<T: DeserializeOwned>(slice: &[u8]) -> JsonSerdeResult<T> {
-    serde_json::from_slice(slice).map_err(|error| JsonSerdeError::decode(&error))
+pub fn from_slice<'de, T: Deserialize<'de>>(slice: &'de [u8]) -> JsonSerdeResult<T> {
+    from_slice_with_limits(slice, Limits::default())
+}
+
+/// Decode a UTF-8 byte slice using inclusive shared bounds. Values can borrow from the slice.
+///
+/// # Errors
+/// Returns a limit or codec diagnostic.
+pub fn from_slice_with_limits<'de, T: Deserialize<'de>>(
+    slice: &'de [u8],
+    limits: Limits,
+) -> JsonSerdeResult<T> {
+    bounds::check_slice(slice, limits)?;
+    decode_bounded(serde_json::Deserializer::from_slice(slice))
+        .map_err(|error| JsonSerdeError::decode(&error))
 }
 
 /// Deserialize a value from a JSON string slice.
@@ -164,8 +232,21 @@ pub fn from_slice<T: DeserializeOwned>(slice: &[u8]) -> JsonSerdeResult<T> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when decoding fails.
-pub fn from_str<T: DeserializeOwned>(source: &str) -> JsonSerdeResult<T> {
-    serde_json::from_str(source).map_err(|error| JsonSerdeError::decode(&error))
+pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> JsonSerdeResult<T> {
+    from_str_with_limits(source, Limits::default())
+}
+
+/// Decode a string with inclusive shared bounds.
+///
+/// # Errors
+/// Returns a limit or codec diagnostic.
+pub fn from_str_with_limits<'de, T: Deserialize<'de>>(
+    source: &'de str,
+    limits: Limits,
+) -> JsonSerdeResult<T> {
+    bounds::check_slice(source.as_bytes(), limits)?;
+    decode_bounded(serde_json::Deserializer::from_str(source))
+        .map_err(|error| JsonSerdeError::decode(&error))
 }
 
 /// Deserialize a value from a reader.
@@ -174,7 +255,23 @@ pub fn from_str<T: DeserializeOwned>(source: &str) -> JsonSerdeResult<T> {
 ///
 /// Returns [`JsonSerdeError`] when decoding fails.
 pub fn from_reader<T: DeserializeOwned, R: Read>(reader: R) -> JsonSerdeResult<T> {
-    serde_json::from_reader(reader).map_err(|error| JsonSerdeError::decode(&error))
+    from_reader_with_limits(reader, Limits::default())
+}
+
+/// Decode a reader incrementally with inclusive shared bounds.
+///
+/// # Errors
+/// Returns a limit, I/O or codec diagnostic.
+pub fn from_reader_with_limits<T: DeserializeOwned, R: Read>(
+    reader: R,
+    limits: Limits,
+) -> JsonSerdeResult<T> {
+    let mut input = bounds::BoundedRead::new(reader, limits);
+    let decoded = decode_bounded(serde_json::Deserializer::from_reader(&mut input));
+    if let Some(pos) = input.limit_position() {
+        return Err(JsonSerdeError::Limit { pos });
+    }
+    decoded.map_err(|error| JsonSerdeError::decode(&error))
 }
 
 /// Convert a workspace-owned [`JsonValue`] into a typed value.

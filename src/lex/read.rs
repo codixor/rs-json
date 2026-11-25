@@ -22,7 +22,9 @@ pub struct ReadLexer<R: Read> {
     pos: Pos,
     token_start: Pos,
     span: Span,
+    configured: Limits,
     max_token_bytes: u64,
+    document_end: u64,
     // While capturing, the current token is spill + buf[segment..head].
     segment: Option<usize>,
     limit_end: u64,
@@ -40,12 +42,17 @@ impl<R: Read> ReadLexer<R> {
         };
         Self {
             reader,
-            buf: alloc::vec![0; cfg.read_buf.max(1)].into_boxed_slice(),
+            buf: alloc::vec![0; cfg.read_buf.max(1).min(
+                usize::try_from(limits.max_document_bytes.saturating_add(1)).unwrap_or(usize::MAX)
+            )]
+            .into_boxed_slice(),
             head: 0,
             tail: 0,
             eof: false,
             pos,
             token_start: pos,
+            configured: limits,
+            document_end: limits.max_document_bytes,
             max_token_bytes: (limits.max_token_bytes as u64).min(u64::from(u32::MAX)),
             span: Span::default(),
             segment: None,
@@ -81,8 +88,19 @@ impl<R: Read> ReadLexer<R> {
         self.head = 0;
         self.tail = 0;
         loop {
-            match self.reader.read(&mut self.buf) {
-                Ok(n) if n <= self.buf.len() => {
+            let remaining = usize::try_from(
+                self.document_end
+                    .saturating_sub(self.pos.offset)
+                    .saturating_add(1),
+            )
+            .unwrap_or(usize::MAX)
+            .min(self.buf.len());
+            let dest = self
+                .buf
+                .get_mut(..remaining)
+                .expect("read budget fits buffer");
+            match self.reader.read(dest) {
+                Ok(n) if n <= dest.len() => {
                     self.tail = n;
                     self.eof = n == 0;
                     return Ok(());
@@ -105,7 +123,16 @@ impl<R: Read> ReadLexer<R> {
             if len == 0 {
                 return Ok(());
             }
-            let whitespace = buf.get(..len).expect("whitespace prefix");
+            if len as u64 > self.document_end - self.pos.offset {
+                return Err(Error {
+                    kind: ErrorKind::SizeLimit,
+                    pos: self.pos,
+                });
+            }
+            let whitespace = self
+                .buf
+                .get(self.head..self.head + len)
+                .expect("whitespace prefix");
             let last_lf = whitespace.iter().rposition(|&b| b == b'\n');
             if let Some(last) = last_lf {
                 let lines = whitespace.split(|&b| b == b'\n').count() - 1;
@@ -134,7 +161,7 @@ impl<R: Read> ReadLexer<R> {
         self.refill()?;
         let buf = self.buf.get(self.head..self.tail).expect("unread buffer");
         // At the cap, look at one byte to distinguish a delimiter from an overlong token.
-        let budget = usize::try_from(self.limit_end - self.offset())
+        let budget = usize::try_from(self.limit_end.min(self.document_end) - self.offset())
             .unwrap_or(usize::MAX)
             .max(1);
         Ok(buf.get(..budget).unwrap_or(buf))
@@ -145,8 +172,9 @@ impl<R: Read> ReadLexer<R> {
     }
 
     fn advance(&mut self, len: usize) -> Result<(), Error> {
-        if len as u64 > self.limit_end - self.pos.offset {
-            return Err(self.error(self.limit_end, ErrorKind::SizeLimit));
+        let end = self.limit_end.min(self.document_end);
+        if len as u64 > end - self.pos.offset {
+            return Err(self.error(end, ErrorKind::SizeLimit));
         }
         self.head += len;
         self.pos.offset += len as u64;
@@ -154,13 +182,9 @@ impl<R: Read> ReadLexer<R> {
         Ok(())
     }
 
-    fn begin_content(&mut self, bounded: bool) {
+    fn begin_content(&mut self) {
         self.segment = Some(self.head);
-        self.limit_end = if bounded {
-            self.pos.offset.saturating_add(self.max_token_bytes)
-        } else {
-            u64::MAX
-        };
+        self.limit_end = self.pos.offset.saturating_add(self.max_token_bytes);
     }
 
     fn end_content(&mut self) {
@@ -182,7 +206,7 @@ impl<R: Read> ReadLexer<R> {
             self.advance(1)?;
         }
         let start = self.offset();
-        self.begin_content(string || matches!(first, Some(b'-' | b'0'..=b'9')));
+        self.begin_content();
         let kind = match first {
             Some(b'"') => Token::Str {
                 escaped: fragment::string_body(self)?,
@@ -222,6 +246,19 @@ fn saturate_u32(n: usize) -> u32 {
 
 impl<R: Read> Lexer for ReadLexer<R> {
     fn next_token(&mut self) -> Result<Token, Error> {
+        self.next_token_bounded(
+            self.configured.max_document_bytes,
+            self.configured.max_token_bytes,
+        )
+    }
+
+    fn next_token_bounded(&mut self, document_end: u64, max_token: usize) -> Result<Token, Error> {
+        if self.pos.offset > document_end {
+            return Err(self.error(document_end, ErrorKind::SizeLimit));
+        }
+        self.document_end = document_end;
+        self.max_token_bytes =
+            (max_token.min(self.configured.max_token_bytes) as u64).min(u64::from(u32::MAX));
         self.spill.clear();
         self.segment = None;
         self.limit_end = u64::MAX;
@@ -231,6 +268,14 @@ impl<R: Read> Lexer for ReadLexer<R> {
         let base = self.pos.offset;
         let cap = self.max_token_bytes;
         let bytes = self.buf.get(self.head..self.tail).expect("unread buffer");
+        if base >= document_end && !bytes.is_empty() {
+            return Err(Error {
+                kind: ErrorKind::SizeLimit,
+                pos: self.pos,
+            });
+        }
+        let budget = usize::try_from((document_end - base).saturating_add(1)).unwrap_or(usize::MAX);
+        let bytes = bytes.get(..budget).unwrap_or(bytes);
         let first = bytes.first().copied();
         let string = first == Some(b'"');
         let number = matches!(first, Some(b'-' | b'0'..=b'9'));
@@ -247,8 +292,17 @@ impl<R: Read> Lexer for ReadLexer<R> {
             && (kind != Token::Num || slice.offset() < bytes.len())
         {
             let span = slice.span();
-            if (string || number) && u64::from(span.len) > cap {
-                return Err(self.error(base + span.start + cap, ErrorKind::SizeLimit));
+            if matches!(
+                kind,
+                Token::Num | Token::Str { .. } | Token::True | Token::False | Token::Null
+            ) && u64::from(span.len) > cap
+            {
+                return Err(self.error(
+                    base.saturating_add(span.start)
+                        .saturating_add(cap)
+                        .min(document_end),
+                    ErrorKind::SizeLimit,
+                ));
             }
             let start = self.head + usize::try_from(span.start).expect("offset inside buffer");
             self.local_content = start..start + span.len as usize;

@@ -1,5 +1,10 @@
 # 0.2 slice parser measurements
 
+The 0.2 tables and reproduction commands use the [historical v0.2 harness](https://github.com/codixor/rs-json/tree/v0.2.0/benches) and its [0.1.0 comparison results](https://github.com/codixor/rs-json/blob/v0.2.0/docs/BENCH.md). Starting in
+0.4, the published benchmark dependency is rs-json 0.3.0 and its Criterion
+lane is `rs_json_030::parse`. The generated mixed fixture measures 16,804,466
+bytes. The 0.4 corpus harness permits that exact document size.
+
 The [corpus benchmarks](#corpus-benchmarks-on-arbi-pc) compare seven operations on
 four in-memory documents in default and native Ryzen builds.
 
@@ -419,3 +424,43 @@ On the benchmark host, the checked-in dependency configuration passed
 `cargo fmt --all --check`, strict Clippy across all features and targets,
 tests with all features and with default features disabled, and
 `cargo check --locked --benches --all-features`.
+
+## 0.4 shared limits on arbi-pc
+
+The 0.4 release candidate and published 0.3.0 ran in the same Criterion
+executables with Rust 1.100.0 and the default CPU target. On these eight
+fixtures, all four small one-shot latency intervals overlapped. The 0.4
+one-shot parser took 18.8% longer for Twitter, 15.5% for CITM and 16.5% for
+Canada. Each pair of 95% intervals was separate. The mixed document took
+5.1% longer with overlapping intervals. Reusing the parser was fastest on
+the mixed document in this run.
+
+| Small fixture | 0.3 one-shot ns | 0.4 one-shot ns | 0.4 reused ns |
+| --- | ---: | ---: | ---: |
+| Tiny object | 46.8 [41.6, 51.9] | 48.8 [43.5, 53.9] | 28.3 [25.6, 30.9] |
+| Ticker | 284.9 [260.3, 308.1] | 278.3 [240.3, 316.3] | 45.1 [40.8, 49.4] |
+| Escaped | 68.4 [61.1, 75.4] | 69.4 [62.2, 76.0] | 33.9 [29.9, 37.7] |
+| Nested | 457.1 [415.8, 496.5] | 462.3 [415.1, 508.3] | 45.8 [41.4, 50.0] |
+
+| Corpus fixture | 0.3 one-shot ms | 0.4 one-shot ms | 0.4 reused ms | 0.4 one-shot MB/s |
+| --- | ---: | ---: | ---: | ---: |
+| Twitter | 1.81 [1.69, 1.94] | 2.15 [1.95, 2.35] | 2.19 [1.98, 2.39] | 293.3 |
+| CITM | 4.83 [4.43, 5.22] | 5.57 [5.23, 5.92] | 5.37 [5.12, 5.62] | 309.9 |
+| Canada | 9.88 [9.27, 10.49] | 11.51 [10.96, 12.08] | 11.17 [10.44, 11.93] | 195.5 |
+| Generated mixed | 139.91 [127.56, 152.46] | 147.01 [134.15, 160.01] | 123.17 [113.11, 135.24] | 114.3 |
+
+Each cell shows the Criterion slope, or the mean for flat sampling, with its
+95% bootstrap interval. There were 30 samples per lane, one second of warmup,
+a three-second measurement target and 10,000 resamples. The harness permitted
+the mixed document's exact size. Its input checksum and those of the other
+three corpus fixtures matched the 0.2 corpus report.
+
+The Ryzen 9 WSL2 host used logical CPU 21, 25 ms per 100 ms, nice 15, a
+1 GiB memory cap and one Cargo job. Bench LTO and debug symbols were off.
+The historical guard checked host and guest CPU against 35% and guest load
+against 7.7. These results cover default-target native slice parsing.
+
+A follow-up tried bypassing token checks when the entire remaining slice
+fit both bounds. Twitter and Canada remained slower and the CITM estimate
+changed by about one percentage point. The release retains the implementation
+measured in the tables. [Measured source and harness](https://github.com/codixor/rs-json/tree/0b51c90edb50f5d4adf41661e05242fd481a4477)

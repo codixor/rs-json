@@ -29,8 +29,8 @@ fn bench(c: &mut Criterion) {
                 );
             });
         }
-        g.bench_function("rs_json_010::parse", |b| {
-            b.iter(|| rs_json_010::parse(black_box(doc)).unwrap());
+        g.bench_function("rs_json_030::parse", |b| {
+            b.iter(|| rs_json_030::parse(black_box(doc)).unwrap());
         });
         g.bench_function("rs_json::parse", |b| {
             b.iter(|| rs_json::parse(black_box(doc)).unwrap());
@@ -50,10 +50,10 @@ fn bench(c: &mut Criterion) {
 fn cycle(c: &mut Criterion, name: &str, docs: &[&str]) {
     let mut group = c.benchmark_group(format!("rotating/{name}"));
     group.throughput(Throughput::Elements(docs.len() as u64));
-    group.bench_function("rs_json_010::parse", |b| {
+    group.bench_function("rs_json_030::parse", |b| {
         b.iter(|| {
             for &doc in black_box(docs) {
-                black_box(rs_json_010::parse(black_box(doc)).unwrap());
+                black_box(rs_json_030::parse(black_box(doc)).unwrap());
             }
         });
     });

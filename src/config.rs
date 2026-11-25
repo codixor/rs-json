@@ -1,30 +1,6 @@
-//! Parser limits and tuning knobs. All defaults are provisional until the
-//! benchmark gates in `docs/PLAN.md` confirm them.
+//! Shared parser limits and reader buffer sizing.
 
-/// Hard limits that protect against hostile input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Limits {
-    /// Maximum number of simultaneously open arrays and objects (default 512).
-    /// A scalar has depth zero. A root container has depth one, including an empty one.
-    /// The first opener beyond the limit reports [`crate::ErrorKind::DepthLimit`].
-    pub max_depth: u32,
-    /// Maximum input size for the tape DOM (tape offsets are `u32`).
-    /// Larger inputs must use the streaming layer.
-    pub max_document_bytes: u64,
-    /// Maximum length of a single string or number token in the streaming
-    /// layer (bounds the spill buffer when a token straddles refills).
-    pub max_token_bytes: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_depth: 512,
-            max_document_bytes: u64::from(u32::MAX),
-            max_token_bytes: 64 * 1024 * 1024,
-        }
-    }
-}
+pub use rs_format::Limits;
 
 /// Buffer sizing for reader-backed parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

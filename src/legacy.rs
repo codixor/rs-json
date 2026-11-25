@@ -229,8 +229,7 @@ impl Index<&str> for JsonItem<'_> {
 /// Parse an input using 0.2 validation and return a compatibility handle.
 ///
 /// # Errors
-/// Reports syntax and resource limits. As in 0.1, the optional error extract
-/// contains input bytes and should only be displayed when appropriate.
+/// Reports syntax and resource limits. Errors retain only the category and position.
 pub fn parse(src: &str) -> Result<JsonItem<'_>, JsonError> {
     crate::parse(src)
         .map(|doc| JsonItem::new(Some(Arc::new(doc)), 0))

@@ -1,27 +1,22 @@
 use super::JsonErrorKind;
 use thiserror::Error;
-const EXTRACT_PADDING: usize = 8;
 
-/// Parser error with a stable kind, byte index, and nearby source extract.
+/// Parser error with a stable kind, byte index and source position.
 #[derive(Clone, PartialEq, Eq, Error)]
 #[error("{kind} at index {index} in JSON data")]
 pub struct JsonError {
     kind: JsonErrorKind,
     index: usize,
-    extract: Option<String>,
+    pos: crate::Pos,
 }
 
 impl JsonError {
     pub(super) fn from_parse(source: &str, error: crate::Error) -> Self {
         let (kind, index) = Self::location(source, error);
-        let start = index.saturating_sub(EXTRACT_PADDING);
-        let end = usize::min(source.len(), index.saturating_add(EXTRACT_PADDING));
-        let extract = source.get(start..end).map(ToOwned::to_owned);
-
         Self {
             kind,
             index,
-            extract,
+            pos: crate::Pos::resolve(source.as_bytes(), index as u64),
         }
     }
 
@@ -62,10 +57,10 @@ impl JsonError {
         self.index
     }
 
-    /// Optional nearby source extract for diagnostics.
+    /// Compatibility accessor. Since 0.4 errors retain no source extract.
     #[must_use]
     pub const fn extract(&self) -> &Option<String> {
-        &self.extract
+        &None
     }
 
     /// Legacy compatibility accessor.
@@ -87,5 +82,15 @@ impl core::fmt::Debug for JsonError {
             .field("kind", &self.kind)
             .field("index", &self.index)
             .finish_non_exhaustive()
+    }
+}
+
+impl crate::FormatError for JsonError {
+    fn category(&self) -> crate::Category {
+        self.kind.category()
+    }
+
+    fn position(&self) -> Option<crate::Position> {
+        Some(self.pos.into())
     }
 }
