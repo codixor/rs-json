@@ -124,7 +124,11 @@ impl<'a> SliceLexer<'a> {
             self.pos += 1;
         }
         if start == self.pos {
-            Err(self.err(ErrorKind::InvalidNumber))
+            Err(self.err(if self.byte().is_none() {
+                ErrorKind::UnexpectedEof
+            } else {
+                ErrorKind::InvalidNumber
+            }))
         } else {
             Ok(())
         }
@@ -206,15 +210,20 @@ impl Lexer for SliceLexer<'_> {
                     b'n' => (Token::Null, b"null"),
                     _ => return Err(self.err(ErrorKind::InvalidToken)),
                 };
-                if !self
-                    .src
-                    .get(start..)
-                    .is_some_and(|tail| tail.starts_with(word))
-                {
+                let end = document_end.min(start.saturating_add(max_token));
+                let tail = self.src.get(start..).unwrap_or_default();
+                let available = (end - start).min(tail.len()).min(word.len());
+                if tail.get(..available) != word.get(..available) {
                     return Err(self.err(ErrorKind::InvalidToken));
                 }
-                let end = document_end.min(start.saturating_add(max_token));
-                if word.len() > end - start {
+                if available < word.len() {
+                    if available == tail.len() {
+                        return Err(Error::at(
+                            self.src,
+                            self.src.len(),
+                            ErrorKind::UnexpectedEof,
+                        ));
+                    }
                     return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
                 }
                 (token, word.len())

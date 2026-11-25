@@ -127,6 +127,74 @@ fn document_budget_includes_every_byte_and_whitespace() {
 }
 
 #[test]
+fn the_first_exceeded_limit_wins_across_inputs() {
+    for (source, depth, document, token, first) in [
+        ("[[0]]", 1, 4, 8, 1),
+        (r#"["abcd"]"#, 1, 6, 2, 4),
+        ("[true]", 1, 4, 2, 3),
+        ("[true]", 1, 2, 3, 2),
+    ] {
+        assert_bounds(
+            source,
+            Limits {
+                max_depth: depth,
+                max_document_bytes: document,
+                max_token_bytes: token,
+                ..Default::default()
+            },
+            Some(first),
+        );
+    }
+}
+
+#[test]
+fn incomplete_literal_and_number_prefixes_report_the_input_end() {
+    for prefix in ["t", "tru", "fa", "nul", "-", "1.", "1e", "1E-"] {
+        let input = format!("[\n {prefix}");
+        let wanted = Pos::resolve(input.as_bytes(), input.len() as u64);
+        let check = |error: Error| {
+            assert_eq!(error.category(), Category::Eof, "{input:?}");
+            assert_eq!(error.pos, wanted, "{input:?}");
+        };
+        check(rs_json::parse(&input).unwrap_err());
+        check(rs_json::parse_bytes(input.as_bytes()).unwrap_err());
+        check(rs_json::Parser::new().parse(&input).unwrap_err());
+        #[cfg(feature = "read")]
+        for read_buf in [1, 3, 64] {
+            check(
+                drain(PullParser::from_reader(
+                    input.as_bytes(),
+                    rs_json::config::BufConfig {
+                        read_buf,
+                        ..Default::default()
+                    },
+                    Limits::default(),
+                ))
+                .unwrap_err(),
+            );
+        }
+    }
+    for invalid in ["trX", "fa]", "1.]", "1e+ "] {
+        assert_eq!(
+            rs_json::parse(invalid).unwrap_err().category(),
+            Category::Syntax
+        );
+    }
+}
+
+#[test]
+fn multi_document_accepts_json_whitespace_as_framing() {
+    let parse = |input: &[u8]| {
+        drain(
+            PullParser::new(SliceLexer::new(input, false), Limits::default()).multi_document(true),
+        )
+    };
+    assert!(parse(b"{}[]\n 42\r\ntrue").is_ok());
+    let error = parse(b"\x1e{}\n").unwrap_err();
+    assert_eq!((error.category(), error.offset()), (Category::Syntax, 0));
+}
+
+#[test]
 fn depth_is_inclusive_and_json_charges_zero_expansion() {
     let source = "\n [\"[{}]\",{\"x\":\"\\u0061\"}]";
     for (depth, excess) in [(0, Some(2)), (1, Some(10)), (2, None)] {

@@ -27,7 +27,10 @@ impl JsonError {
         };
         // 0.1 classifies any nonspace tail after a valid root as trailing data,
         // even when the next token itself is lexically invalid.
-        if error.kind == JsonErrorKind::InvalidToken {
+        if matches!(
+            error.kind,
+            JsonErrorKind::InvalidToken | JsonErrorKind::UnexpectedEof
+        ) {
             let mut parser =
                 PullParser::new(SliceLexer::from_str(source), crate::Limits::default());
             while let Ok(event) = parser.next_event() {

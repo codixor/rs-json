@@ -51,7 +51,8 @@ source. The parser borrows token bytes from its refill buffer and retains a
 token that spans multiple reads. Skipped values obey the same limits.
 With `multi_document(true)` each root starts a fresh byte budget immediately
 after the previous root. Separator whitespace counts toward the next budget.
-Positions stay relative to the beginning of the stream.
+Positions stay relative to the beginning of the stream. Consecutive values and
+newline-delimited JSON are supported. RFC 7464 record separators require external framing.
 
 ```rust
 use rs_json::{Limits, config::BufConfig, stream::{Event, PullParser}};
@@ -93,7 +94,8 @@ errors. It exposes a `Category` and the known coordinates in a `Position`.
 Errors discard source text and custom Serde and I/O messages before callers
 can format or traverse them. Native failures and typed limit failures carry
 byte offsets and one-based byte columns. Typed backend failures retain the
-backend's known line and column. An unavailable coordinate is `None`.
+backend's known line and column. A numeric range error is classified as `Data`.
+DOM-to-Serde conversion reports locations in the original document. An unavailable coordinate is `None`.
 
 ```rust
 use rs_json::{Category, FormatError, Limits, parse_with_limits};

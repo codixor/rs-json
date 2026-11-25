@@ -54,6 +54,67 @@ fn serde_value_bridge_roundtrips() {
 }
 
 #[test]
+fn finite_floats_roundtrip_bit_for_bit_across_text_and_dom() {
+    for original in [
+        51.248_178_375_505_404_f64,
+        -93.311_370_376_880_33,
+        f64::MIN_POSITIVE,
+    ] {
+        let encoded = to_string(&original).unwrap();
+        let document = rs_json::parse(&encoded).unwrap();
+        for decoded in [
+            from_str::<f64>(&encoded).unwrap(),
+            from_slice::<f64>(encoded.as_bytes()).unwrap(),
+            from_reader::<f64, _>(encoded.as_bytes()).unwrap(),
+            document.root().as_f64().unwrap(),
+            document.root().to_serde().unwrap().as_f64().unwrap(),
+        ] {
+            assert_eq!(decoded.to_bits(), original.to_bits(), "{encoded}");
+        }
+    }
+}
+
+#[test]
+fn numeric_range_is_a_data_error_in_original_source_coordinates() {
+    use rs_format::{Category, FormatError};
+    let input = "{\n  \"é\": [1e999]\n}";
+    let doc = rs_json::parse(input).unwrap();
+    let direct = from_str::<JsonValue>(input).unwrap_err();
+    let byte_column = input.lines().nth(1).unwrap().find(']').unwrap();
+    for error in [
+        direct,
+        from_slice::<JsonValue>(input.as_bytes()).unwrap_err(),
+        doc.root().to_serde().unwrap_err(),
+        doc.root()
+            .get("é")
+            .unwrap()
+            .at(0)
+            .unwrap()
+            .to_serde()
+            .unwrap_err(),
+    ] {
+        assert_eq!(FormatError::category(&error), Category::Data);
+        assert_eq!(error.position(), Some((2, byte_column)));
+    }
+    let reader_error = from_reader::<JsonValue, _>(input.as_bytes()).unwrap_err();
+    let backend = serde_json::from_reader::<_, JsonValue>(input.as_bytes()).unwrap_err();
+    assert_eq!(FormatError::category(&reader_error), Category::Data);
+    assert_eq!(
+        reader_error.position(),
+        Some((backend.line(), backend.column()))
+    );
+    let too_large = "340282366920938463463374607431768211456";
+    assert_eq!(
+        FormatError::category(&from_str::<u128>(too_large).unwrap_err()),
+        Category::Data
+    );
+    assert_eq!(
+        FormatError::category(&from_str::<f64>("1.e2").unwrap_err()),
+        Category::Syntax
+    );
+}
+
+#[test]
 fn serde_pretty_variants_emit_json() {
     let user = sample_user();
     let pretty_string = to_string_pretty(&user).unwrap();

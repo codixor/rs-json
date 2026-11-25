@@ -228,7 +228,8 @@ impl<L: Lexer> PullParser<L> {
         }
     }
 
-    /// Accept a sequence of root values (NDJSON, JSON-seq, concatenated).
+    /// Accept consecutive root values, with optional JSON whitespace between them.
+    /// This includes newline-delimited JSON. RFC 7464 record separators require external framing.
     #[must_use]
     pub fn multi_document(mut self, on: bool) -> Self {
         self.multi_document = on;

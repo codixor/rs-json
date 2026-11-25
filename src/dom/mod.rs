@@ -197,17 +197,20 @@ pub struct DocRef<'p, 'a> {
 /// enter the open-index stack; a rejected opener cannot allocate a tape node.
 fn build(
     src: &[u8],
-    limits: Limits,
+    mut limits: Limits,
     mut lexer: SliceLexer<'_>,
     tape: &mut Vec<Node>,
     grammar: &mut Grammar,
     open: &mut Vec<u32>,
 ) -> Result<(), Error> {
-    let document_end = limits.max_document_bytes.min(u64::from(u32::MAX));
-    if src.len() as u64 > document_end {
+    limits.max_document_bytes = limits.max_document_bytes.min(u64::from(u32::MAX));
+    if src.len() as u64 > limits.max_document_bytes {
+        // An earlier token or opener can cross its own limit first. Walk the
+        // bounded prefix without allocating tape nodes for a rejected document.
+        while grammar.next(&mut lexer, limits, false)? != Event::Eof {}
         return Err(Error::at(
             src,
-            usize::try_from(document_end).unwrap_or(usize::MAX),
+            usize::try_from(limits.max_document_bytes).unwrap_or(usize::MAX),
             ErrorKind::SizeLimit,
         ));
     }
