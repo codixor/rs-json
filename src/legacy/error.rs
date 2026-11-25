@@ -6,6 +6,7 @@ use thiserror::Error;
 #[error("{kind} at index {index} in JSON data")]
 pub struct JsonError {
     kind: JsonErrorKind,
+    category: crate::Category,
     index: usize,
     pos: crate::Pos,
 }
@@ -13,30 +14,67 @@ pub struct JsonError {
 impl JsonError {
     pub(super) fn from_parse(source: &str, error: crate::Error) -> Self {
         let (kind, index) = Self::location(source, error);
+        let trailing = kind == JsonErrorKind::TrailingCharacters;
         Self {
             kind,
+            category: if trailing {
+                kind.category()
+            } else {
+                error.kind.category()
+            },
             index,
-            pos: crate::Pos::resolve(source.as_bytes(), index as u64),
+            pos: if trailing {
+                crate::Pos::resolve(source.as_bytes(), index as u64)
+            } else {
+                error.pos
+            },
         }
     }
 
     fn location(source: &str, error: crate::Error) -> (JsonErrorKind, usize) {
         use crate::{
             lex::slice::SliceLexer,
-            stream::{Event, PullParser},
+            stream::{Event, Grammar},
         };
         // 0.1 classifies any nonspace tail after a valid root as trailing data,
         // even when the next token itself is lexically invalid.
-        if error.kind == JsonErrorKind::InvalidToken {
-            let mut parser =
-                PullParser::new(SliceLexer::from_str(source), crate::Limits::default());
-            while let Ok(event) = parser.next_event() {
-                if event == Event::End {
-                    let end = parser.into_inner().offset();
-                    return (
-                        JsonErrorKind::TrailingCharacters,
-                        crate::scan::skip_ws(source.as_bytes(), end),
-                    );
+        if matches!(
+            error.kind,
+            JsonErrorKind::InvalidToken | JsonErrorKind::UnexpectedEof
+        ) {
+            let bytes = source.as_bytes();
+            let mut lexer = SliceLexer::from_str(source);
+            let mut grammar = Grammar::default();
+            loop {
+                let previous = lexer.offset();
+                match grammar.next(&mut lexer, crate::Limits::default(), false) {
+                    Ok(Event::End) => {
+                        return (
+                            JsonErrorKind::TrailingCharacters,
+                            crate::scan::skip_ws(bytes, previous),
+                        );
+                    }
+                    Ok(Event::Eof) => break,
+                    Ok(_) => {}
+                    Err(_) => {
+                        if error.kind == JsonErrorKind::UnexpectedEof {
+                            // A grammar step can consume a comma or colon before reading its value.
+                            let mut start = crate::scan::skip_ws(bytes, previous);
+                            if matches!(bytes.get(start), Some(b',' | b':')) {
+                                start = crate::scan::skip_ws(bytes, start + 1);
+                            }
+                            match bytes.get(start) {
+                                Some(b'-' | b'0'..=b'9') => {
+                                    return (JsonErrorKind::InvalidNumber, source.len());
+                                }
+                                Some(b't' | b'f' | b'n') => {
+                                    return (JsonErrorKind::InvalidToken, start);
+                                }
+                                _ => {}
+                            }
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -87,7 +125,7 @@ impl core::fmt::Debug for JsonError {
 
 impl crate::FormatError for JsonError {
     fn category(&self) -> crate::Category {
-        self.kind.category()
+        self.category
     }
 
     fn position(&self) -> Option<crate::Position> {

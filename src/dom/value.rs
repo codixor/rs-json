@@ -292,7 +292,21 @@ impl Value<'_, '_> {
                 NodeTag::Str => {
                     JsonValue::String(value.as_str().expect("string node").into_owned())
                 }
-                NodeTag::Num => crate::from_str(value.raw())?,
+                NodeTag::Num => {
+                    let raw = value.raw();
+                    // The tape already validated the number and its limits.
+                    let number = serde_json::from_str(raw).map_err(|error| {
+                        let relative = error.column().saturating_sub(1).min(raw.len());
+                        let pos =
+                            crate::Pos::resolve(value.doc.src, u64::from(node.a) + relative as u64);
+                        crate::JsonSerdeError::Deserialize {
+                            category: crate::JsonSerdeCategory::Data,
+                            line: pos.line as usize,
+                            column: pos.col as usize,
+                        }
+                    })?;
+                    JsonValue::Number(number)
+                }
             };
             values.push(built);
         }

@@ -9,10 +9,17 @@ use std::io::Read;
 pub(super) fn literal(input: &mut ReadLexer<impl Read>, mut word: &[u8]) -> Result<(), Error> {
     let start = input.offset();
     while !word.is_empty() {
+        let at_limit = input.offset() == input.limit_end.min(input.document_end);
         let buf = input.chunk()?;
         let n = word.len().min(buf.len());
         let (prefix, rest) = word.split_at(n);
-        if n == 0 || !buf.starts_with(prefix) {
+        if n == 0 {
+            return Err(input.error(input.offset(), ErrorKind::UnexpectedEof));
+        }
+        if at_limit {
+            return Err(input.error(input.offset(), ErrorKind::SizeLimit));
+        }
+        if !buf.starts_with(prefix) {
             return Err(input.error(start, ErrorKind::InvalidToken));
         }
         input.advance(n)?;
@@ -33,7 +40,12 @@ fn digits(input: &mut ReadLexer<impl Read>) -> Result<(), Error> {
         }
     }
     if start == input.offset() {
-        Err(input.error(start, ErrorKind::InvalidNumber))
+        let kind = if input.peek()?.is_none() {
+            ErrorKind::UnexpectedEof
+        } else {
+            ErrorKind::InvalidNumber
+        };
+        Err(input.error(start, kind))
     } else {
         Ok(())
     }

@@ -103,13 +103,9 @@ impl Budget {
 }
 
 pub(super) fn check_slice(bytes: &[u8], limits: Limits) -> JsonSerdeResult<()> {
-    if bytes.len() as u64 > limits.max_document_bytes {
-        return Err(JsonSerdeError::Limit {
-            pos: Pos::resolve(bytes, limits.max_document_bytes),
-        });
-    }
     // One byte opens at most one container or contributes one token byte.
-    if bytes.len() <= limits.max_token_bytes
+    if bytes.len() as u64 <= limits.max_document_bytes
+        && bytes.len() <= limits.max_token_bytes
         && bytes.len() as u64 <= u64::from(limits.max_depth.min(MAX_DEPTH))
     {
         return Ok(());

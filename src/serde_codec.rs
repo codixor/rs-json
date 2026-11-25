@@ -26,7 +26,7 @@ pub enum JsonSerdeError {
     },
     /// Decoding failed.
     Deserialize {
-        /// How the underlying codec classified the failure.
+        /// Decode category, including Data for a number outside the requested representation.
         category: JsonSerdeCategory,
         /// Source line, starting at one. Zero indicates an unknown location.
         line: usize,
@@ -52,8 +52,17 @@ impl JsonSerdeError {
     }
 
     fn decode(error: &serde_json::Error) -> Self {
+        // serde_json groups NumberOutOfRange with grammar errors and exposes
+        // only its formatted diagnostic. Custom Serde messages are already Data.
+        let category = if error.is_syntax()
+            && error.to_string().split(" at line ").next() == Some("number out of range")
+        {
+            JsonSerdeCategory::Data
+        } else {
+            error.classify()
+        };
         Self::Deserialize {
-            category: error.classify(),
+            category,
             line: error.line(),
             column: error.column(),
         }
