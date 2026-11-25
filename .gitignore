@@ -1,2 +1,5 @@
 /target/
 /.worktrees/
+/data/
+/fuzz/target/
+/fuzz/artifacts/

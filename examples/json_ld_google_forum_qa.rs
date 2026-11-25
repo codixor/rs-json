@@ -1,3 +1,4 @@
+//! JSON-LD google forum qa.
 use rs_json::ld::google::forum_qa::{
     Answer, DiscussionForumPosting, ForumComment, QAPage, Question,
 };

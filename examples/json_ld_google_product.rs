@@ -1,3 +1,4 @@
+//! JSON-LD google product.
 use rs_json::{
     JsonLdObject,
     ld::google::commerce::{MerchantReturnPolicy, Offer, OfferShippingDetails, Product},

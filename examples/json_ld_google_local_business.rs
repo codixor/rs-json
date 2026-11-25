@@ -1,3 +1,4 @@
+//! JSON-LD google local business.
 use rs_json::ld::google::{
     business::LocalBusiness, jobs_events::PostalAddress, reviews::AggregateRating,
 };

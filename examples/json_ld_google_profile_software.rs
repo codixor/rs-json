@@ -1,3 +1,4 @@
+//! JSON-LD google profile software.
 use rs_json::ld::google::{
     profiles::{ProfilePage, ProfilePerson},
     reviews::AggregateRating,

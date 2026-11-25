@@ -1,3 +1,4 @@
+//! JSON-LD google breadcrumb.
 use rs_json::ld::google::navigation::{BreadcrumbList, BreadcrumbListItem};
 
 fn main() {

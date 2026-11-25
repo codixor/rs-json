@@ -12,10 +12,18 @@ pub type JsonValue = serde_json::Value;
 /// Strongly typed error for serde-backed JSON encoding and decoding.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum JsonSerdeError {
+    /// Encoding failed.
     #[error("failed to serialize JSON: {message}")]
-    Serialize { message: String },
+    Serialize {
+        /// Diagnostic from the underlying codec.
+        message: String,
+    },
+    /// Decoding failed.
     #[error("failed to deserialize JSON: {message}")]
-    Deserialize { message: String },
+    Deserialize {
+        /// Diagnostic from the underlying codec.
+        message: String,
+    },
 }
 
 /// Serialize a value to UTF-8 JSON bytes.

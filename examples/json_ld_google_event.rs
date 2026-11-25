@@ -1,3 +1,4 @@
+//! JSON-LD google event.
 use rs_json::ld::google::{
     business::Organization,
     commerce::Offer,

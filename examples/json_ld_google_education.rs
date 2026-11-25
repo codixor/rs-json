@@ -1,3 +1,4 @@
+//! JSON-LD google education.
 use rs_json::ld::google::education::{Course, CourseList, Quiz};
 
 fn main() {

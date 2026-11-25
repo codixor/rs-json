@@ -1,3 +1,4 @@
+//! JSON-LD google organization policy.
 use rs_json::ld::google::{business::Organization, commerce::MerchantReturnPolicy};
 
 fn main() {

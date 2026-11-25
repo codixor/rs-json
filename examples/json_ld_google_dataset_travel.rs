@@ -1,3 +1,4 @@
+//! JSON-LD google dataset travel.
 use rs_json::ld::google::{
     data_travel::{Accommodation, DataCatalog, DataDownload, Dataset, VacationRental},
     jobs_events::PostalAddress,

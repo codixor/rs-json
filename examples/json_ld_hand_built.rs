@@ -1,3 +1,4 @@
+//! JSON-LD hand built.
 use rs_json::{JsonLdArray, JsonLdDocument, JsonLdObject};
 
 fn main() {

@@ -1,3 +1,4 @@
+//! JSON-LD google video.
 use rs_json::ld::google::media::{BroadcastEvent, Clip, VideoObject};
 
 fn main() {

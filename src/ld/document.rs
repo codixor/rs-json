@@ -130,7 +130,7 @@ impl JsonLdDocument {
         let json = self.to_json_string()?;
         let mut out = String::with_capacity(PREFIX.len() + json.len() + SUFFIX.len());
         out.push_str(PREFIX);
-        out.push_str(&json);
+        push_script_json(&mut out, &json);
         out.push_str(SUFFIX);
         Ok(out)
     }
@@ -148,9 +148,20 @@ impl JsonLdDocument {
         let json = self.to_json_string_pretty()?;
         let mut out = String::with_capacity(PREFIX.len() + json.len() + SUFFIX.len());
         out.push_str(PREFIX);
-        out.push_str(&json);
+        push_script_json(&mut out, &json);
         out.push_str(SUFFIX);
         Ok(out)
+    }
+}
+
+// HTML parses script contents as raw text, even for application/ld+json.
+// Escaping every less-than sign prevents JSON strings from changing HTML state.
+fn push_script_json(out: &mut String, json: &str) {
+    for (index, part) in json.split('<').enumerate() {
+        if index != 0 {
+            out.push_str(r"\u003c");
+        }
+        out.push_str(part);
     }
 }
 

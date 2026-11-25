@@ -1,3 +1,8 @@
+//! serde codec.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "these assertions exercise public JSON indexing on fixed test fixtures"
+)]
 use rs_json::{
     JsonValue, from_slice, from_str, from_value, to_string, to_string_pretty, to_value, to_vec,
     to_vec_pretty,
@@ -56,4 +61,25 @@ fn serde_pretty_variants_emit_json() {
     assert!(pretty_string.contains('\n'));
     assert!(pretty_bytes.contains(&b'\n'));
     assert_eq!(value["name"], JsonValue::String(String::from("alice")));
+}
+
+#[test]
+fn serde_streams_roundtrip_and_preserve_error_categories() {
+    let user = sample_user();
+    let mut bytes = Vec::new();
+    rs_json::to_writer(&mut bytes, &user).unwrap();
+    assert_eq!(
+        rs_json::from_reader::<User, _>(bytes.as_slice()).unwrap(),
+        user
+    );
+    bytes.clear();
+    rs_json::to_writer_pretty(&mut bytes, &user).unwrap();
+    assert_eq!(
+        rs_json::from_reader::<User, _>(bytes.as_slice()).unwrap(),
+        user
+    );
+    assert!(matches!(
+        rs_json::from_reader::<User, _>(&b"["[..]),
+        Err(rs_json::JsonSerdeError::Deserialize { .. })
+    ));
 }

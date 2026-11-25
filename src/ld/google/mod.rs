@@ -23,23 +23,35 @@
 use crate::{JsonLdArray, JsonLdObject, JsonValue};
 
 mod breadcrumb;
+/// Businesses, organizations and their physical locations.
 pub mod business;
+/// Products, offers, shipping and return policies.
 pub mod commerce;
 mod commerce_types;
 mod content;
+/// Datasets and vacation rental listings.
 pub mod data_travel;
+/// Courses, quizzes and flashcards.
 pub mod education;
+/// Forum discussions and question-and-answer pages.
 pub mod forum_qa;
+/// Job postings, events and their locations.
 pub mod jobs_events;
 mod local_business;
+/// Videos, clips and broadcasts.
 pub mod media;
+/// Breadcrumb lists and entries.
 pub mod navigation;
 mod organization;
 mod product;
+/// Profiles and the people they describe.
 pub mod profiles;
+/// Articles, blog posts and recipes.
 pub mod publishing;
 mod review;
+/// Individual reviews and aggregate ratings.
 pub mod reviews;
+/// Software application listings.
 pub mod software;
 
 pub(crate) const SCHEMA_ORG_CONTEXT: &str = "https://schema.org";

@@ -1,3 +1,4 @@
+//! JSON-LD google news.
 use rs_json::ld::google::{business::Organization, publishing::NewsArticle};
 
 fn main() {

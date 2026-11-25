@@ -1,3 +1,8 @@
+//! JSON-LD google.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "these assertions exercise public JSON indexing on fixed test fixtures"
+)]
 use rs_json::{
     JsonLdArray, JsonLdDocument, JsonLdObject, JsonValue,
     ld::google::{

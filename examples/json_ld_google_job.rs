@@ -1,3 +1,4 @@
+//! JSON-LD google job.
 use rs_json::{
     JsonLdObject,
     ld::google::{

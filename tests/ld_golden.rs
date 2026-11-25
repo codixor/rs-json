@@ -1,3 +1,4 @@
+//! JSON-LD golden.
 use rs_json::{
     JsonLdObject,
     ld::google::{

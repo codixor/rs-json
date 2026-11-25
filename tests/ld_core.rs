@@ -1,3 +1,8 @@
+//! JSON-LD core.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "these assertions exercise public JSON indexing on fixed test fixtures"
+)]
 use rs_json::{JsonLdArray, JsonLdDocument, JsonLdObject, JsonValue};
 
 #[test]
@@ -141,4 +146,24 @@ fn json_ld_document_pretty_output_is_deterministic() {
         pretty,
         "{\n  \"@context\": \"https://schema.org\",\n  \"@type\": \"Organization\",\n  \"name\": \"Acme\",\n  \"url\": \"https://example.com\"\n}"
     );
+}
+
+#[test]
+fn embedded_json_preserves_less_than_in_keys_and_values() {
+    let document = JsonLdDocument::new().field("<label", "price < 5");
+    for tag in [
+        document.to_script_tag().unwrap(),
+        document.to_script_tag_pretty().unwrap(),
+    ] {
+        let body = tag
+            .strip_prefix(r#"<script type="application/ld+json">"#)
+            .unwrap()
+            .strip_suffix("</script>")
+            .unwrap();
+        assert!(!body.contains('<'));
+        assert_eq!(
+            rs_json::from_str::<JsonValue>(body).unwrap(),
+            document.to_value()
+        );
+    }
 }
