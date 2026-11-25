@@ -163,3 +163,48 @@ fn encoding_diagnostics_omit_custom_serialize_text() {
     assert_redacted(&error);
     assert!(matches!(error, JsonSerdeError::Serialize { .. }));
 }
+
+#[test]
+fn shared_diagnostics_expose_only_known_coordinates_and_categories() {
+    use rs_format::{Category, FormatError};
+    let source = format!("\n\"{FIXTURE}\"");
+    let rejected = from_str::<u64>(&source).unwrap_err();
+    let error: &dyn FormatError = &rejected;
+    assert_eq!(error.category(), Category::Data);
+    let position = error.position().unwrap();
+    assert_eq!(position.offset, None);
+    assert_eq!(position.line.unwrap().get(), 2);
+    assert_eq!(position.column.unwrap().get() as usize, source.len() - 1);
+
+    let limit = rs_json::from_reader_with_limits::<String, _>(
+        source.as_bytes(),
+        rs_json::Limits {
+            max_token_bytes: 2,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert_redacted(&limit);
+    assert_eq!(FormatError::category(&limit), Category::Limit);
+    assert_eq!(FormatError::position(&limit).unwrap().offset, Some(4));
+    assert_eq!(
+        FormatError::category(&rs_json::to_writer(FailingStream, &1).unwrap_err()),
+        Category::Io
+    );
+    assert_eq!(
+        FormatError::category(&from_reader::<u64, _>(FailingStream).unwrap_err()),
+        Category::Io
+    );
+    assert_eq!(
+        FormatError::category(&from_str::<JsonValue>("[}").unwrap_err()),
+        Category::Syntax
+    );
+    assert_eq!(
+        FormatError::category(&from_str::<JsonValue>("[").unwrap_err()),
+        Category::Eof
+    );
+
+    let borrowed: &str =
+        rs_json::from_str_with_limits(r#""borrowed""#, rs_json::Limits::default()).unwrap();
+    assert_eq!(borrowed, "borrowed");
+}

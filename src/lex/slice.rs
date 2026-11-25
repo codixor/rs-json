@@ -68,12 +68,19 @@ impl<'a> SliceLexer<'a> {
         Ok(token)
     }
 
-    fn lex_string(&mut self) -> Result<Token, Error> {
+    fn lex_string(&mut self, end: usize, document_end: usize) -> Result<Token, Error> {
         self.pos += 1;
         let start = self.pos;
         let mut escaped = false;
+        let body = self.src.get(..end).unwrap_or(self.src);
         loop {
-            self.pos = crate::scan::string_run_end(self.src, self.pos);
+            self.pos = crate::scan::string_run_end(body, self.pos);
+            if self.pos >= end
+                && self.byte().is_some()
+                && (self.byte() != Some(b'"') || self.pos >= document_end)
+            {
+                return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
+            }
             match self.byte() {
                 None => return Err(self.err(ErrorKind::UnexpectedEof)),
                 Some(b'"') => {
@@ -86,12 +93,22 @@ impl<'a> SliceLexer<'a> {
                     let (_, used) = crate::unescape::escape(tail).map_err(|kind| self.err(kind))?;
                     escaped = true;
                     self.pos += 1 + used;
+                    if self.pos > end {
+                        return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
+                    }
                 }
                 Some(0x80..=0xff) => {
-                    let tail = self.src.get(self.pos..).unwrap_or_default();
+                    let tail = body.get(self.pos..).unwrap_or_default();
                     let len = tail.iter().position(u8::is_ascii).unwrap_or(tail.len());
                     let run = tail.get(..len).unwrap_or_default();
                     if !self.trusted_utf8 && simdutf8::basic::from_utf8(run).is_err() {
+                        if self.pos + len == end
+                            && self.src.get(end).is_some_and(|b| !b.is_ascii())
+                            && core::str::from_utf8(run)
+                                .is_err_and(|error| error.error_len().is_none())
+                        {
+                            return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
+                        }
                         return Err(self.err(ErrorKind::InvalidString));
                     }
                     self.pos += len;
@@ -144,8 +161,20 @@ impl<'a> SliceLexer<'a> {
 
 impl Lexer for SliceLexer<'_> {
     fn next_token(&mut self) -> Result<Token, Error> {
-        self.pos = crate::scan::skip_ws(self.src, self.pos);
+        self.next_token_bounded(u64::MAX, usize::MAX)
+    }
+
+    fn next_token_bounded(&mut self, document_end: u64, max_token: usize) -> Result<Token, Error> {
+        let document_end = usize::try_from(document_end).unwrap_or(usize::MAX);
+        if self.pos > document_end {
+            return Err(Error::at(self.src, document_end, ErrorKind::SizeLimit));
+        }
+        let doc = self.src.get(..document_end).unwrap_or(self.src);
+        self.pos = crate::scan::skip_ws(doc, self.pos);
         let start = self.pos;
+        if start >= document_end && self.byte().is_some() {
+            return Err(self.err(ErrorKind::SizeLimit));
+        }
         let (token, len) = match self.byte() {
             None => (Token::Eof, 0),
             Some(b'{') => (Token::ObjBegin, 1),
@@ -154,8 +183,22 @@ impl Lexer for SliceLexer<'_> {
             Some(b']') => (Token::ArrEnd, 1),
             Some(b':') => (Token::Colon, 1),
             Some(b',') => (Token::Comma, 1),
-            Some(b'"') => return self.lex_string(),
-            Some(b'-' | b'0'..=b'9') => return self.lex_number(),
+            Some(b'"') => {
+                let end = document_end.min((start + 1).saturating_add(max_token));
+                return self.lex_string(end, document_end);
+            }
+            Some(b'-' | b'0'..=b'9') => {
+                let end = document_end.min(start.saturating_add(max_token));
+                // One lookahead distinguishes a delimiter from more number bytes.
+                let full = self.src;
+                self.src = full.get(..end.saturating_add(1)).unwrap_or(full);
+                let result = self.lex_number();
+                self.src = full;
+                if self.pos > end {
+                    return Err(Error::at(full, end, ErrorKind::SizeLimit));
+                }
+                return result;
+            }
             Some(b) => {
                 let (token, word): (_, &[u8]) = match b {
                     b't' => (Token::True, b"true"),
@@ -169,6 +212,10 @@ impl Lexer for SliceLexer<'_> {
                     .is_some_and(|tail| tail.starts_with(word))
                 {
                     return Err(self.err(ErrorKind::InvalidToken));
+                }
+                let end = document_end.min(start.saturating_add(max_token));
+                if word.len() > end - start {
+                    return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
                 }
                 (token, word.len())
             }

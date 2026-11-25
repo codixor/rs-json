@@ -145,9 +145,9 @@ impl Parser {
     /// # Errors
     /// Invalid JSON or exceeded limits.
     pub fn parse<'p, 'a>(&'p mut self, src: &'a str) -> Result<DocRef<'p, 'a>, Error> {
-        if src.len() as u64 <= self.limits.max_document_bytes
-            && self.layout.accepts(src, self.limits.max_depth)
-        {
+        let entire_input_fits = src.len() as u64 <= self.limits.max_document_bytes
+            && src.len() <= self.limits.max_token_bytes;
+        if entire_input_fits && self.layout.accepts(src, self.limits.max_depth) {
             return Ok(DocRef {
                 src: src.as_bytes(),
                 tape: &self.tape,
@@ -156,7 +156,7 @@ impl Parser {
         self.layout.reset();
         self.tape.clear();
         if src.len() <= small::MAX_BYTES
-            && src.len() as u64 <= self.limits.max_document_bytes
+            && entire_input_fits
             && small::build(src, self.limits.max_depth, &mut self.tape).is_some()
         {
             self.layout.remember(src, &self.tape, self.limits.max_depth);
@@ -203,11 +203,16 @@ fn build(
     grammar: &mut Grammar,
     open: &mut Vec<u32>,
 ) -> Result<(), Error> {
-    if src.len() as u64 > limits.max_document_bytes.min(u64::from(u32::MAX)) {
-        return Err(Error::at(src, 0, ErrorKind::SizeLimit));
+    let document_end = limits.max_document_bytes.min(u64::from(u32::MAX));
+    if src.len() as u64 > document_end {
+        return Err(Error::at(
+            src,
+            usize::try_from(document_end).unwrap_or(usize::MAX),
+            ErrorKind::SizeLimit,
+        ));
     }
     loop {
-        let event = grammar.next(&mut lexer, limits.max_depth, false)?;
+        let event = grammar.next(&mut lexer, limits, false)?;
         let span = lexer.span();
         // At most one node per input byte, and the document fits u32 offsets.
         let index = u32::try_from(tape.len())

@@ -24,7 +24,15 @@ fn rejects_invalid_object_structure() {
 }
 
 #[test]
-fn exposes_nearby_extract() {
+fn diagnostic_retains_only_location_and_kind() {
     let error = parse(r#"{"a":[1,2,]}"#).unwrap_err();
-    assert!(error.extract().is_some());
+    assert!(error.extract().is_none());
+    assert_eq!(
+        rs_json::FormatError::category(&error),
+        rs_json::Category::Syntax
+    );
+    assert_eq!(
+        rs_json::FormatError::position(&error).unwrap().offset,
+        Some(error.index() as u64)
+    );
 }

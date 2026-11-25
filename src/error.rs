@@ -100,3 +100,41 @@ impl Error {
         self.pos.offset
     }
 }
+
+impl ErrorKind {
+    pub(crate) fn category(self) -> rs_format::Category {
+        use rs_format::Category;
+        match self {
+            Self::Io => Category::Io,
+            Self::UnexpectedEof => Category::Eof,
+            Self::DepthLimit | Self::SizeLimit => Category::Limit,
+            Self::InvalidToken
+            | Self::InvalidString
+            | Self::LoneSurrogate
+            | Self::InvalidNumber
+            | Self::InvalidObject
+            | Self::InvalidArray
+            | Self::TrailingCharacters => Category::Syntax,
+        }
+    }
+}
+
+impl From<Pos> for rs_format::Position {
+    fn from(pos: Pos) -> Self {
+        Self {
+            offset: Some(pos.offset),
+            line: core::num::NonZeroU32::new(pos.line),
+            column: core::num::NonZeroU32::new(pos.col),
+        }
+    }
+}
+
+impl rs_format::FormatError for Error {
+    fn category(&self) -> rs_format::Category {
+        self.kind.category()
+    }
+
+    fn position(&self) -> Option<rs_format::Position> {
+        Some(self.pos.into())
+    }
+}
