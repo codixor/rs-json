@@ -68,23 +68,14 @@ impl<'a> SliceLexer<'a> {
         Ok(token)
     }
 
-    fn lex_string<const BOUNDED: bool>(
-        &mut self,
-        end: usize,
-        document_end: usize,
-    ) -> Result<Token, Error> {
+    fn lex_string(&mut self, end: usize, document_end: usize) -> Result<Token, Error> {
         self.pos += 1;
         let start = self.pos;
         let mut escaped = false;
-        let body = if BOUNDED {
-            self.src.get(..end).unwrap_or(self.src)
-        } else {
-            self.src
-        };
+        let body = self.src.get(..end).unwrap_or(self.src);
         loop {
             self.pos = crate::scan::string_run_end(body, self.pos);
-            if BOUNDED
-                && self.pos >= end
+            if self.pos >= end
                 && self.byte().is_some()
                 && (self.byte() != Some(b'"') || self.pos >= document_end)
             {
@@ -102,7 +93,7 @@ impl<'a> SliceLexer<'a> {
                     let (_, used) = crate::unescape::escape(tail).map_err(|kind| self.err(kind))?;
                     escaped = true;
                     self.pos += 1 + used;
-                    if BOUNDED && self.pos > end {
+                    if self.pos > end {
                         return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
                     }
                 }
@@ -111,8 +102,7 @@ impl<'a> SliceLexer<'a> {
                     let len = tail.iter().position(u8::is_ascii).unwrap_or(tail.len());
                     let run = tail.get(..len).unwrap_or_default();
                     if !self.trusted_utf8 && simdutf8::basic::from_utf8(run).is_err() {
-                        if BOUNDED
-                            && self.pos + len == end
+                        if self.pos + len == end
                             && self.src.get(end).is_some_and(|b| !b.is_ascii())
                             && core::str::from_utf8(run)
                                 .is_err_and(|error| error.error_len().is_none())
@@ -167,22 +157,22 @@ impl<'a> SliceLexer<'a> {
         }
         self.token(start, self.pos, Token::Num)
     }
-    fn scan_token<const BOUNDED: bool>(
-        &mut self,
-        document_end: usize,
-        max_token: usize,
-    ) -> Result<Token, Error> {
-        if BOUNDED && self.pos > document_end {
+}
+
+impl Lexer for SliceLexer<'_> {
+    fn next_token(&mut self) -> Result<Token, Error> {
+        self.next_token_bounded(u64::MAX, usize::MAX)
+    }
+
+    fn next_token_bounded(&mut self, document_end: u64, max_token: usize) -> Result<Token, Error> {
+        let document_end = usize::try_from(document_end).unwrap_or(usize::MAX);
+        if self.pos > document_end {
             return Err(Error::at(self.src, document_end, ErrorKind::SizeLimit));
         }
-        let doc = if BOUNDED {
-            self.src.get(..document_end).unwrap_or(self.src)
-        } else {
-            self.src
-        };
+        let doc = self.src.get(..document_end).unwrap_or(self.src);
         self.pos = crate::scan::skip_ws(doc, self.pos);
         let start = self.pos;
-        if BOUNDED && start >= document_end && self.byte().is_some() {
+        if start >= document_end && self.byte().is_some() {
             return Err(self.err(ErrorKind::SizeLimit));
         }
         let (token, len) = match self.byte() {
@@ -195,12 +185,9 @@ impl<'a> SliceLexer<'a> {
             Some(b',') => (Token::Comma, 1),
             Some(b'"') => {
                 let end = document_end.min((start + 1).saturating_add(max_token));
-                return self.lex_string::<BOUNDED>(end, document_end);
+                return self.lex_string(end, document_end);
             }
             Some(b'-' | b'0'..=b'9') => {
-                if !BOUNDED {
-                    return self.lex_number();
-                }
                 let end = document_end.min(start.saturating_add(max_token));
                 // One lookahead distinguishes a delimiter from more number bytes.
                 let full = self.src;
@@ -227,7 +214,7 @@ impl<'a> SliceLexer<'a> {
                     return Err(self.err(ErrorKind::InvalidToken));
                 }
                 let end = document_end.min(start.saturating_add(max_token));
-                if BOUNDED && word.len() > end - start {
+                if word.len() > end - start {
                     return Err(Error::at(self.src, end, ErrorKind::SizeLimit));
                 }
                 (token, word.len())
@@ -235,22 +222,6 @@ impl<'a> SliceLexer<'a> {
         };
         self.pos += len;
         self.token(start, self.pos, token)
-    }
-}
-
-impl Lexer for SliceLexer<'_> {
-    fn next_token(&mut self) -> Result<Token, Error> {
-        self.scan_token::<false>(usize::MAX, usize::MAX)
-    }
-
-    fn next_token_bounded(&mut self, document_end: u64, max_token: usize) -> Result<Token, Error> {
-        let document_end = usize::try_from(document_end).unwrap_or(usize::MAX);
-        // Once the remaining input fits both budgets, even an unterminated
-        // token cannot cross either bound. Use the ordinary scanner thereafter.
-        if self.src.len() <= document_end && self.src.len().saturating_sub(self.pos) <= max_token {
-            return self.next_token();
-        }
-        self.scan_token::<true>(document_end, max_token)
     }
 
     fn span(&self) -> Span {
