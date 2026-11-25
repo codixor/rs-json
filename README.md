@@ -112,6 +112,32 @@ their backend-specific return types. Use `FormatError::category(&error)` to
 include encoding and limit failures. Code matching `Serialize { message }` can
 now match `Serialize { category }`. The legacy extract accessors return `None`.
 
+### Safe error detail
+
+`Display` and `Debug` never show input. For a message a person can act on,
+`JsonSerdeError::detail()` returns sanitized text: the field at fault, the
+expected type, and messages raised by the target type's own `Deserialize` or
+`Serialize` impl. Values taken from the input are reduced to their kind.
+
+```rust
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Args { port: u16 }
+
+let error = rs_json::from_str::<Args>(r#"{"tokn": "hunter2"}"#).unwrap_err();
+assert_eq!(error.detail(), Some("unknown field `tokn`, expected `port`"));
+let error = rs_json::from_str::<Args>(r#"{"port": "hunter2"}"#).unwrap_err();
+assert_eq!(error.detail(), Some("invalid type: a string, expected u16"));
+```
+
+Field names are object keys from the input and are kept. A message from a
+third-party impl is only as safe as that impl; log `Display` when unsure.
+I/O and limit errors have no detail. `JsonSerdeError::Serialize` and
+`Deserialize` gained a `detail` field, so code that builds them needs
+`detail: JsonSerdeDetail::NONE`. The encoders (`to_vec`, `to_string`,
+`to_writer`, `to_value` and the pretty forms) now accept unsized values such
+as `&[T]` and `&str`.
+
 The [0.4 benchmark results](docs/BENCH.md#04-shared-limits-on-arbi-pc) compare the
 limited native slice parser with 0.3.0 on eight fixtures.
 

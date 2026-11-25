@@ -269,3 +269,112 @@ fn shared_diagnostics_expose_only_known_coordinates_and_categories() {
         rs_json::from_str_with_limits(r#""borrowed""#, rs_json::Limits::default()).unwrap();
     assert_eq!(borrowed, "borrowed");
 }
+
+#[test]
+fn detail_names_the_field_but_never_the_value() {
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct Args {
+        token: String,
+        port: u16,
+        mode: Mode,
+    }
+    #[derive(Debug, Deserialize)]
+    enum Mode {
+        Read,
+    }
+
+    let unknown = from_str::<Args>(&format!(r#"{{"tokn": "{FIXTURE}"}}"#)).unwrap_err();
+    assert_redacted(&unknown);
+    assert_eq!(
+        unknown.detail(),
+        Some("unknown field `tokn`, expected one of `token`, `port`, `mode`")
+    );
+
+    let missing = from_str::<Args>(r#"{"token": "t"}"#).unwrap_err();
+    assert_eq!(missing.detail(), Some("missing field `port`"));
+
+    let wrong_type = from_str::<Args>(&format!(
+        r#"{{"token": "t", "port": "{FIXTURE}", "mode": "Read"}}"#
+    ))
+    .unwrap_err();
+    assert_redacted(&wrong_type);
+    let detail = wrong_type.detail().unwrap();
+    assert!(!detail.contains(FIXTURE), "{detail}");
+    assert_eq!(detail, "invalid type: a string, expected u16");
+
+    let variant = from_str::<Args>(&format!(
+        r#"{{"token": "t", "port": 1, "mode": "{FIXTURE}"}}"#
+    ))
+    .unwrap_err();
+    assert_redacted(&variant);
+    assert_eq!(variant.detail(), Some("unknown variant, expected `Read`"));
+
+    let value = from_value::<Args>(serde_json::json!({"token": 1})).unwrap_err();
+    assert_eq!(
+        value.detail(),
+        Some("invalid type: an integer, expected a string")
+    );
+}
+
+#[test]
+fn detail_keeps_messages_from_the_types_own_impls() {
+    #[derive(Debug)]
+    struct NoNull;
+    impl<'de> Deserialize<'de> for NoNull {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            Option::<u8>::deserialize(d)?
+                .map(|_| NoNull)
+                .ok_or_else(|| serde::de::Error::custom("a null drops a condition"))
+        }
+    }
+    struct Guarded;
+    impl Serialize for Guarded {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom(
+                "a secret is never copied into a Value",
+            ))
+        }
+    }
+    let error = from_str::<NoNull>("null").unwrap_err();
+    assert_eq!(error.detail(), Some("a null drops a condition"));
+    assert!(!format!("{error:?}").contains("drops"));
+
+    let error = to_value(&Guarded).unwrap_err();
+    assert_eq!(
+        error.detail(),
+        Some("a secret is never copied into a Value")
+    );
+    assert_eq!(error.to_string(), "failed to serialize JSON (Data)");
+}
+
+#[test]
+fn io_and_limit_errors_have_no_detail() {
+    let error = from_reader::<JsonValue, _>(FailingStream).unwrap_err();
+    assert_eq!(error.detail(), None);
+    let error = rs_json::to_writer(FailingStream, &1).unwrap_err();
+    assert_eq!(error.detail(), None);
+    let limits = rs_json::Limits {
+        max_depth: 1,
+        ..rs_json::Limits::default()
+    };
+    let error = rs_json::from_str_with_limits::<JsonValue>("[[1]]", limits).unwrap_err();
+    assert_eq!(error.detail(), None);
+}
+
+#[test]
+fn encoders_accept_unsized_values() {
+    let names: &[&str] = &["a", "b"];
+    assert_eq!(to_string(names).unwrap(), r#"["a","b"]"#);
+    assert_eq!(to_vec("x").unwrap(), br#""x""#);
+    assert_eq!(to_value(names).unwrap(), serde_json::json!(["a", "b"]));
+    let mut out = Vec::new();
+    rs_json::to_writer(&mut out, names).unwrap();
+    rs_json::to_writer_pretty(&mut out, "y").unwrap();
+    assert_eq!(to_string_pretty(names).unwrap().lines().count(), 4);
+    assert_eq!(
+        to_vec_pretty(names).unwrap(),
+        to_string_pretty(names).unwrap().into_bytes()
+    );
+}
