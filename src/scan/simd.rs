@@ -1,12 +1,4 @@
-//! Portable SIMD string kernel on `wide` vectors (pattern from bufjson 1.3).
-//!
-//! * x86 + `simd-dyn`: AVX2 vs SSE2 chosen once via `is_x86_feature_detected!`
-//!   and cached in a `OnceLock` fn pointer.
-//! * Otherwise the widest vector known at compile time (`target_feature`).
-//!
-//! Agent TODO: add the `#[target_feature(enable = "avx2")]` dispatch shim
-//! (the only `unsafe` allowed in the crate), with a test that forces each
-//! kernel and compares against the scalar LUT.
+//! Portable 16-byte string kernel. The caller finishes a partial vector with scalar loads.
 
 use wide::u8x16;
 
@@ -49,6 +41,5 @@ fn run_end<V: ByteVec>(buf: &[u8], mut i: usize) -> usize {
 /// First interesting byte at/after `i` (vector part only; caller finishes the tail).
 #[inline]
 pub(crate) fn string_run_end(buf: &[u8], i: usize) -> usize {
-    // TODO(agent): AVX2 u8x32 path + runtime dispatch under `simd-dyn`.
     run_end::<u8x16>(buf, i)
 }

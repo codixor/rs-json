@@ -10,7 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1.0.154"
-rs-json = { path = "..", features = ["read", "pointer"] }
+rs-json = { path = "..", features = ["read", "pointer", "serde"] }
 
 [[bin]]
 name = "differential"

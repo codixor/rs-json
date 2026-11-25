@@ -1,7 +1,7 @@
 [package]
 name = "rs-json"
 version = "0.2.0"
-publish = false
+publish = ["crates-io"]
 edition = "2024"
 rust-version = "1.100"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,7 @@ repository = "https://github.com/codixor/rs-json"
 readme = "README.md"
 keywords = ["json", "parser", "zero-copy", "streaming", "simd"]
 categories = ["parsing", "encoding", "no-std"]
-include = ["src/**", "benches/**", "tests/alloc_count.rs", "README.md", "LICENSE-*", "Cargo.toml"]
+include = ["src/**", "benches/**", "tests/**", "!tests/conformance/cases/**", "examples/**", "docs/BENCH.md", "README.md", "LICENSE-*", "Cargo.toml"]
 
 [lib]
 name = "rs_json"
@@ -21,18 +21,18 @@ default = ["std", "simd", "simd-dyn"]
 std = ["thiserror/std", "simdutf8/std", "memchr?/std"]
 # Portable SIMD string/whitespace kernels via `wide` (SSE2/NEON/WASM simd128 at compile time).
 simd = ["dep:wide"]
-# x86/x86_64 only: pick AVX2 vs SSE2 once at runtime (cached fn pointer).
+# Compatibility feature enabling the portable SIMD path and std.
 simd-dyn = ["simd", "std"]
 # Inputs
 read = ["std"]                                   # buffered io::Read lexer (large files, sockets)
-async = ["read", "dep:tokio"]                    # tokio AsyncRead lexer
+async = ["read"]                    # reserved integration feature; synchronous reader API only
 mmap = ["std", "dep:memmap2"]                    # memory-mapped file input for big documents
 ndjson = ["dep:memchr"]                          # newline-delimited JSON splitting
 # Higher layers
 pointer = []                                     # streaming RFC 6901 JSON Pointer selection
 serde = ["std", "dep:serde", "dep:serde_json"]   # serde_json-backed codec facade (from old rs-json)
 ld = ["serde"]                                   # JSON-LD + Google profile builders (from old rs-json)
-legacy = []                                      # `JsonItem` compatibility shim for rust-misc callers
+legacy = ["std"]                                      # `JsonItem` compatibility shim for rust-misc callers
 
 [dependencies]
 thiserror = { version = "2.0.21", default-features = false }
@@ -40,11 +40,11 @@ simdutf8 = { version = "0.1.5", default-features = false }
 wide = { version = "1.7.1", default-features = false, optional = true }
 memchr = { version = "2.8.3", default-features = false, optional = true }
 memmap2 = { version = "0.9.12", optional = true }
-tokio = { version = "1.54.1", default-features = false, features = ["io-util"], optional = true }
 serde = { version = "1.0.229", default-features = false, features = ["std"], optional = true }
 serde_json = { version = "1.0.154", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
 rs-json-010 = { package = "rs-json", version = "=0.1.0" }
 stats_alloc = "0.1.10"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports"] }
@@ -73,6 +73,92 @@ harness = false
 name = "stream_large"
 harness = false
 
+
+[[example]]
+name = "json_ld_google_breadcrumb"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_dataset_travel"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_education"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_event"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_forum_qa"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_job"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_local_business"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_news"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_organization_policy"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_product"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_profile_software"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_google_video"
+required-features = ["ld"]
+
+[[example]]
+name = "json_ld_hand_built"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_core"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_golden"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_google"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_google_expanded"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_google_jobs_events"
+required-features = ["ld"]
+
+[[test]]
+name = "ld_google_profiles"
+required-features = ["ld"]
+
+[[test]]
+name = "serde_codec"
+required-features = ["serde"]
+
+[[bench]]
+name = "json_ld"
+required-features = ["ld"]
+harness = false
+
 [profile.release]
 codegen-units = 1
 lto = "fat"
@@ -83,7 +169,7 @@ inherits = "release"
 debug = true          # keep symbols for perf/samply flamegraphs
 
 [lints.rust]
-unsafe_code = "deny"           # only src/scan/simd.rs may opt out, with SAFETY comments
+unsafe_code = "deny"           # isolated immutable-file mapping documents its safety contract
 missing_docs = "warn"
 unreachable_pub = "warn"
 

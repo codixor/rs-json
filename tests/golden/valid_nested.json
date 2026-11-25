@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "name": "json",
+    "versions": [1, 2, 3]
+  },
+  "flags": [true, false, null]
+}

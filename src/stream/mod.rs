@@ -250,19 +250,20 @@ impl<L: Lexer> PullParser<L> {
     /// As [`Self::next_event`], or an invalid token if the next event is not a value.
     pub fn skip_value(&mut self) -> Result<(), Error> {
         match self.next_event()? {
-            Event::ObjectStart | Event::ArrayStart => {
-                let level = self.grammar.stack.depth();
-                while self.grammar.stack.depth() >= level {
-                    self.next_event()?;
-                }
-                Ok(())
-            }
+            Event::ObjectStart | Event::ArrayStart => self.skip_open(),
             Event::Str { .. } | Event::Num | Event::Bool(_) | Event::Null => Ok(()),
             _ => Err(Error {
                 kind: ErrorKind::InvalidToken,
                 pos: self.lexer.position(self.lexer.span().start),
             }),
         }
+    }
+    fn skip_open(&mut self) -> Result<(), Error> {
+        let level = self.grammar.stack.depth();
+        while self.grammar.stack.depth() >= level {
+            self.next_event()?;
+        }
+        Ok(())
     }
 }
 

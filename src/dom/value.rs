@@ -24,7 +24,7 @@ pub enum ValueKind {
 #[derive(Debug, Clone, Copy)]
 pub struct Value<'d, 'a> {
     doc: &'d Document<'a>,
-    idx: u32,
+    pub(crate) idx: u32,
 }
 
 impl<'d, 'a> Value<'d, 'a> {
@@ -206,6 +206,21 @@ pub struct ObjectIter<'d, 'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct Key<'d, 'a>(Value<'d, 'a>);
 
+impl<'a> Key<'_, 'a> {
+    /// Original string body, including any JSON escape sequences.
+    pub fn raw(self) -> &'a str {
+        self.0.raw()
+    }
+
+    /// Decoded object key, borrowing the source when possible.
+    ///
+    /// # Panics
+    /// Only if the validated tape contains a non-string key.
+    pub fn as_str(self) -> Cow<'a, str> {
+        self.0.as_str().expect("object key is a string")
+    }
+}
+
 impl PartialEq<&str> for Key<'_, '_> {
     fn eq(&self, other: &&str) -> bool {
         let n = self.0.node();
@@ -226,5 +241,61 @@ impl<'d, 'a> Iterator for ObjectIter<'d, 'a> {
             self.next = Value::skip(self.doc, vi);
             (Key(k), Value::new(self.doc, vi))
         })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Value<'_, '_> {
+    /// Materialize this subtree as an owned Serde JSON value.
+    /// Duplicate object keys keep their last value, as in `serde_json`.
+    ///
+    /// # Errors
+    /// Returns a codec error for numbers outside `serde_json`'s enabled range.
+    ///
+    /// # Panics
+    /// Only if the validated tape contains inconsistent node or child counts.
+    pub fn to_serde(self) -> crate::JsonSerdeResult<crate::JsonValue> {
+        use crate::JsonValue;
+        let mut work = alloc::vec![(self, false)];
+        let mut values = alloc::vec::Vec::new();
+        while let Some((value, finish)) = work.pop() {
+            let node = value.node();
+            let built = match node.tag {
+                NodeTag::Arr | NodeTag::Obj if !finish => {
+                    work.push((value, true));
+                    // LIFO visits children in reverse, leaving the first child
+                    // on top of the result stack for the finishing pass.
+                    if let Some(elements) = value.elements() {
+                        work.extend(elements.map(|child| (child, false)));
+                    } else if let Some(entries) = value.entries() {
+                        work.extend(entries.map(|(_, child)| (child, false)));
+                    }
+                    continue;
+                }
+                NodeTag::Arr => JsonValue::Array(
+                    (0..node.b)
+                        .map(|_| values.pop().expect("completed array element"))
+                        .collect(),
+                ),
+                NodeTag::Obj => {
+                    let mut map = serde_json::Map::new();
+                    for (key, _) in value.entries().expect("object node") {
+                        map.insert(
+                            key.as_str().into_owned(),
+                            values.pop().expect("completed object field"),
+                        );
+                    }
+                    JsonValue::Object(map)
+                }
+                NodeTag::Null => JsonValue::Null,
+                NodeTag::True | NodeTag::False => JsonValue::Bool(node.tag == NodeTag::True),
+                NodeTag::Str => {
+                    JsonValue::String(value.as_str().expect("string node").into_owned())
+                }
+                NodeTag::Num => crate::from_str(value.raw())?,
+            };
+            values.push(built);
+        }
+        Ok(values.pop().expect("a value has one root"))
     }
 }

@@ -35,7 +35,7 @@ pub struct BufConfig {
     /// Files at or below this size are read into one buffer and parsed with
     /// the slice lexer (fewest syscalls, best cache behaviour).
     pub small_file_max: u64,
-    /// Files above this size use mmap (feature `mmap`) for DOM parsing.
+    /// Minimum size for an anonymous mapped snapshot when a file exceeds `small_file_max`.
     pub mmap_min: u64,
 }
 

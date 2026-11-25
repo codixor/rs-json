@@ -6,8 +6,7 @@
 //!    bytes of every string, where most JSON strings already end.
 //! 2. **SWAR** — 8 bytes per step in a `u64`, no dependencies, wins for
 //!    medium strings and on targets without SIMD.
-//! 3. **SIMD** (`simd` feature, `wide`) — 16/32 bytes per step for long runs.
-//!    On x86 with `simd-dyn` the AVX2-vs-SSE2 choice is made once at runtime.
+//! 3. **SIMD** (`simd` feature, `wide`) — 16 bytes per step for long runs.
 //!
 //! No input padding is required: every kernel finishes the tail scalar, so
 //! the DOM stays zero-copy (simd-json needs a padded mutable copy).
