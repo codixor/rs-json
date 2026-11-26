@@ -94,11 +94,13 @@ fn numeric_range_is_a_data_error_in_original_source_coordinates() {
             .unwrap_err(),
     ] {
         assert_eq!(FormatError::category(&error), Category::Data);
+        assert_eq!(error.detail(), Some("number out of range"));
         assert_eq!(error.position(), Some((2, byte_column)));
     }
     let reader_error = from_reader::<JsonValue, _>(input.as_bytes()).unwrap_err();
     let backend = serde_json::from_reader::<_, JsonValue>(input.as_bytes()).unwrap_err();
     assert_eq!(FormatError::category(&reader_error), Category::Data);
+    assert_eq!(reader_error.detail(), Some("number out of range"));
     assert_eq!(
         reader_error.position(),
         Some((backend.line(), backend.column()))
@@ -174,12 +176,13 @@ fn decode_failures_keep_category_and_location() {
     assert_redacted(&error);
     assert_eq!(error.category(), Some(JsonSerdeCategory::Data));
     assert_eq!(error.position(), None);
-    for (json, expected) in [
-        ("[}", JsonSerdeCategory::Syntax),
-        ("[1", JsonSerdeCategory::Eof),
+    for (json, expected, detail) in [
+        ("[}", JsonSerdeCategory::Syntax, "expected value"),
+        ("[1", JsonSerdeCategory::Eof, "EOF while parsing a list"),
     ] {
         let error = from_str::<JsonValue>(json).unwrap_err();
         assert_eq!(error.category(), Some(expected));
+        assert_eq!(error.detail(), Some(detail));
         assert!(error.position().is_some());
     }
 }
@@ -288,13 +291,12 @@ fn detail_never_quotes_the_input() {
 
     let unknown = from_str::<Args>(&format!(r#"{{"{FIXTURE}": 1}}"#)).unwrap_err();
     assert_redacted(&unknown);
-    assert_eq!(
-        unknown.detail(),
-        Some("unknown field, expected one of `token`, `port`, `mode`")
-    );
+    assert_eq!(unknown.detail(), Some("unknown field"));
 
     let missing = from_str::<Args>(r#"{"token": "t"}"#).unwrap_err();
-    assert_eq!(missing.detail(), Some("missing field `port`"));
+    assert_eq!(missing.detail(), Some("missing field"));
+    let duplicate = from_str::<Args>(r#"{"token":"a","token":"b"}"#).unwrap_err();
+    assert_eq!(duplicate.detail(), Some("duplicate field"));
 
     let wrong_type = from_str::<Args>(&format!(
         r#"{{"token": "t", "port": "{FIXTURE}", "mode": "Read"}}"#
@@ -310,7 +312,7 @@ fn detail_never_quotes_the_input() {
     ))
     .unwrap_err();
     assert_redacted(&variant);
-    assert_eq!(variant.detail(), Some("unknown variant, expected `Read`"));
+    assert_eq!(variant.detail(), Some("unknown variant"));
 
     let value = from_value::<Args>(serde_json::json!({"token": 1})).unwrap_err();
     assert_eq!(
@@ -349,6 +351,104 @@ fn detail_drops_custom_messages() {
     map.insert(vec![1u8], 1);
     let error = to_string(&map).unwrap_err();
     assert_eq!(error.detail(), Some("key must be a string"));
+}
+
+#[test]
+fn custom_decode_text_can_only_select_fixed_labels() {
+    #[derive(Debug)]
+    struct Rejected;
+    impl<'de> Deserialize<'de> for Rejected {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            Err(serde::de::Error::custom(String::deserialize(d)?))
+        }
+    }
+    for (message, detail) in [
+        (format!("missing field `{FIXTURE}`"), Some("missing field")),
+        (
+            format!("duplicate field `{FIXTURE}`"),
+            Some("duplicate field"),
+        ),
+        (
+            format!("unknown field `k`, expected {FIXTURE}"),
+            Some("unknown field"),
+        ),
+        (
+            format!("unknown variant `v`, expected {FIXTURE}"),
+            Some("unknown variant"),
+        ),
+        (
+            format!("invalid length 1, expected {FIXTURE}"),
+            Some("invalid length"),
+        ),
+        (
+            format!("data did not match any variant of untagged enum {FIXTURE}"),
+            Some("no matching enum variant"),
+        ),
+        (
+            format!("no variant of enum {FIXTURE}"),
+            Some("no matching enum variant"),
+        ),
+        (format!("number out of range {FIXTURE}"), None),
+        (
+            format!("invalid type: {FIXTURE}, expected u16 {FIXTURE}"),
+            Some("invalid type: a value"),
+        ),
+        (
+            format!("invalid value: string \"{FIXTURE}\", expected u16"),
+            Some("invalid value: a string, expected u16"),
+        ),
+        (format!("invalid type: {}", FIXTURE.repeat(128)), None),
+    ] {
+        let input = to_string(&message).unwrap();
+        for error in [
+            from_str::<Rejected>(&input).unwrap_err(),
+            from_slice::<Rejected>(input.as_bytes()).unwrap_err(),
+            from_reader::<Rejected, _>(input.as_bytes()).unwrap_err(),
+            from_value::<Rejected>(JsonValue::from(message)).unwrap_err(),
+        ] {
+            assert_redacted(&error);
+            assert_eq!(error.detail(), detail);
+        }
+    }
+}
+
+#[test]
+fn a_custom_expectation_cannot_enter_detail() {
+    #[derive(Debug)]
+    struct ExpectedFromInput;
+    impl<'de> Deserialize<'de> for ExpectedFromInput {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let expected = String::deserialize(d)?;
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Signed(7),
+                &expected.as_str(),
+            ))
+        }
+    }
+    let error = from_value::<ExpectedFromInput>(JsonValue::from(FIXTURE)).unwrap_err();
+    assert_redacted(&error);
+    assert_eq!(error.detail(), Some("invalid value: an integer"));
+}
+
+#[test]
+fn custom_encode_errors_have_no_detail_even_when_the_text_matches_a_label() {
+    struct Rejected;
+    impl Serialize for Rejected {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("key must be a string"))
+        }
+    }
+    for error in [
+        to_value(&Rejected).unwrap_err(),
+        to_vec(&Rejected).unwrap_err(),
+        to_vec_pretty(&Rejected).unwrap_err(),
+        to_string(&Rejected).unwrap_err(),
+        to_string_pretty(&Rejected).unwrap_err(),
+        rs_json::to_writer(io::sink(), &Rejected).unwrap_err(),
+        rs_json::to_writer_pretty(io::sink(), &Rejected).unwrap_err(),
+    ] {
+        assert_eq!(error.detail(), None);
+    }
 }
 
 #[test]

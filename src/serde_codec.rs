@@ -19,15 +19,15 @@ pub type JsonSerdeResult<T> = Result<T, JsonSerdeError>;
 pub type JsonValue = serde_json::Value;
 
 /// A Serde codec failure. `Display` and `Debug` show only the category and
-/// source location. [`JsonSerdeError::detail`] adds text built only from what
-/// the target type declares and the codec's fixed messages (see [`Detail`]).
+/// source location. [`JsonSerdeError::detail`] can supply fixed diagnostic
+/// labels for recognized failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonSerdeError {
     /// Encoding failed.
     Serialize {
         /// I/O for a failed writer, or Data for a value that cannot be encoded.
         category: Category,
-        /// The codec's fixed message, if any. Custom messages are dropped.
+        /// Fixed diagnostic for a recognized encoding failure.
         detail: Detail,
     },
     /// Decoding failed.
@@ -38,7 +38,7 @@ pub enum JsonSerdeError {
         line: usize,
         /// Source column as reported by the codec. It can be zero at a line boundary.
         column: usize,
-        /// Sanitized message: never an input value (see [`Detail`]).
+        /// Fixed diagnostic labels for a recognized decoding failure.
         detail: Detail,
     },
     /// Encoded input exceeded a configured parser bound.
@@ -56,33 +56,25 @@ impl JsonSerdeError {
             } else {
                 Category::Data
             },
-            detail: Detail::encode(error.is_io(), &error.to_string()),
+            detail: Detail::encode(error),
         }
     }
 
     fn decode(error: &serde_json::Error) -> Self {
-        // serde_json groups NumberOutOfRange with grammar errors and exposes
-        // only its formatted diagnostic. Custom Serde messages are already Data.
-        let category = if error.is_syntax()
-            && error.to_string().split(" at line ").next() == Some("number out of range")
-        {
-            JsonSerdeCategory::Data
-        } else {
-            error.classify()
-        };
+        let (category, detail) = Detail::decode(error);
         Self::Deserialize {
             category,
             line: error.line(),
             column: error.column(),
-            detail: Detail::decode(category, &error.to_string()),
+            detail,
         }
     }
 
-    /// Diagnostic text a person can act on, built only from what the target
-    /// type declares (``missing field `port` ``, the expected type, the
-    /// expected fields) and the codec's fixed messages. Values, unknown keys
-    /// and `Error::custom` messages never appear; see [`Detail`] for the
-    /// rules. Limit, I/O and custom-message errors have none.
+    /// Diagnostic text assembled exclusively from fixed codec labels, such as
+    /// "missing field" or "invalid type: a string, expected u16". Field and
+    /// variant names, input values and free-form expectations are omitted.
+    /// A custom decode error with recognized wording can select these same
+    /// labels. Limit, I/O, and unrecognized or oversized messages yield `None`.
     pub fn detail(&self) -> Option<&str> {
         match self {
             Self::Serialize { detail, .. } | Self::Deserialize { detail, .. } => detail.as_str(),

@@ -110,34 +110,35 @@ assert_eq!(diagnostic.position().unwrap().offset, Some(4));
 The existing `JsonSerdeError::category()` and `position()` accessors retain
 their backend-specific return types. Use `FormatError::category(&error)` to
 include encoding and limit failures. Code matching `Serialize { message }` can
-now match `Serialize { category }`. The legacy extract accessors return `None`.
+now match `Serialize { category, .. }`. The legacy extract accessors return `None`.
 
 ### Safe error detail
 
-`Display` and `Debug` never show input. For a message a person can act on,
-`JsonSerdeError::detail()` returns text built only from what the target type
-declares and the codec's fixed messages: missing and duplicate field names,
-the expected type, the expected fields and variants, and grammar errors.
-Values, unknown keys and unknown variants from the input are never included,
-and neither is any `Error::custom` message, since a type's own impl can format
-the value it rejected. Those cases return `None`.
+With the `serde` feature, `JsonSerdeError::detail()` can identify a missing
+or duplicate field, an unknown field or variant, the kinds involved in a type
+mismatch, or a JSON grammar error. Every word comes from a fixed set of labels.
+Field and variant names, input values, custom error text and free-form type
+expectations are omitted. A custom decode error with recognized wording can
+select the same labels. Unrecognized or oversized messages yield `None`.
+`Display` and `Debug` keep their redacted formatting.
 
 ```rust
-#[derive(serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Args { port: u16 }
 
-let error = rs_json::from_str::<Args>(r#"{"hunter2": 1}"#).unwrap_err();
-assert_eq!(error.detail(), Some("unknown field, expected `port`"));
-let error = rs_json::from_str::<Args>(r#"{"port": "hunter2"}"#).unwrap_err();
+let error = rs_json::from_str::<Args>(r#"{"extra": 1}"#).unwrap_err();
+assert_eq!(error.detail(), Some("unknown field"));
+let error = rs_json::from_str::<Args>(r#"{"port": "demo"}"#).unwrap_err();
 assert_eq!(error.detail(), Some("invalid type: a string, expected u16"));
 let error = rs_json::from_str::<Args>("{}").unwrap_err();
-assert_eq!(error.detail(), Some("missing field `port`"));
+assert_eq!(error.detail(), Some("missing field"));
 ```
 
-I/O and limit errors have no detail. `JsonSerdeError::Serialize` and
-`Deserialize` gained a `detail` field, so code that builds them needs
-`detail: JsonSerdeDetail::NONE`. The encoders (`to_vec`, `to_string`,
+I/O and limit errors have no detail. In 0.5, `JsonSerdeError::Serialize` and
+`Deserialize` gained a `detail` field. Include `..` when matching only the
+existing fields, and use `detail: JsonSerdeDetail::NONE` when constructing
+an error without detail. The encoders (`to_vec`, `to_string`,
 `to_writer`, `to_value` and the pretty forms) now accept unsized values such
 as `&[T]` and `&str`.
 
