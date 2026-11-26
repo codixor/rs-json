@@ -120,7 +120,8 @@ mismatch, or a JSON grammar error. Every word comes from a fixed set of labels.
 Field and variant names, input values, custom error text and free-form type
 expectations are omitted. A custom decode error with recognized wording can
 select the same labels. Unrecognized or oversized messages yield `None`.
-`Display` and `Debug` keep their redacted formatting.
+`Display` and `Debug` preserve numeric position metadata. On Serde decode errors,
+the backend reports these coordinates, and custom errors can supply them.
 
 ```rust
 #[derive(Debug, serde::Deserialize)]

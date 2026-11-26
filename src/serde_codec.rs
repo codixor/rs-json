@@ -18,9 +18,9 @@ pub type JsonSerdeResult<T> = Result<T, JsonSerdeError>;
 /// Workspace-owned JSON value type.
 pub type JsonValue = serde_json::Value;
 
-/// A Serde codec failure. `Display` and `Debug` show only the category and
-/// source location. [`JsonSerdeError::detail`] can supply fixed diagnostic
-/// labels for recognized failures.
+/// A Serde codec failure. Formatting preserves numeric position metadata.
+/// [`JsonSerdeError::detail`] can supply fixed diagnostic labels for recognized
+/// failures. See [`JsonSerdeError::position`] for the origin of coordinates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonSerdeError {
     /// Encoding failed.
@@ -34,7 +34,7 @@ pub enum JsonSerdeError {
     Deserialize {
         /// Decode category, including Data for a number outside the requested representation.
         category: JsonSerdeCategory,
-        /// Source line, starting at one. Zero indicates an unknown location.
+        /// Line reported by the codec. Zero indicates an unknown location.
         line: usize,
         /// Source column as reported by the codec. It can be zero at a line boundary.
         column: usize,
@@ -90,7 +90,10 @@ impl JsonSerdeError {
         }
     }
 
-    /// The reported line and column when a decode failure has a source location.
+    /// The reported line and column, when available.
+    ///
+    /// For Serde decode failures, these numbers come from the backend. A custom
+    /// deserializer error can supply them. Limit errors use the parser's position.
     pub fn position(&self) -> Option<(usize, usize)> {
         match self {
             Self::Deserialize { line, column, .. } if *line != 0 => Some((*line, *column)),
