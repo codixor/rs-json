@@ -119,7 +119,7 @@ checksum = "21b298a077223c19e5e24bb8389966c8a8a593415e3cc73fbcd9756ac745637a"
 
 [[package]]
 name = "rs-json"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "memchr",
  "rs-format",

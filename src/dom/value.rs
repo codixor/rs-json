@@ -303,6 +303,7 @@ impl Value<'_, '_> {
                             category: crate::JsonSerdeCategory::Data,
                             line: pos.line as usize,
                             column: pos.col as usize,
+                            detail: crate::serde_codec::Detail::decode_number(),
                         }
                     })?;
                     JsonValue::Number(number)

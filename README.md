@@ -1,13 +1,13 @@
-# rs-json 0.4
+# rs-json 0.5
 
 The slice parser builds a flat tape with 16-byte nodes. `parse` accepts a string,
 `parse_bytes` accepts UTF-8 bytes, and `Parser::parse` reuses its buffers across
 documents. `PullParser` exposes the same grammar for byte slices and synchronous
-readers. Install with `cargo add rs-json@0.4` (Rust 1.100 or newer).
+readers. Install with `cargo add rs-json@0.5` (Rust 1.100 or newer).
 
 ### Shared parser limits
 
-Version 0.4 re-exports `rs_format::Limits` and adopts its inclusive defaults.
+Since version 0.4, the parser uses the inclusive defaults from `rs_format::Limits`.
 Use `parse_with_limits`, `parse_bytes_with_limits`, `Parser::limits` or the
 limits parameter on `PullParser`. With the `serde` feature, use
 `from_str_with_limits`, `from_slice_with_limits` or `from_reader_with_limits`.
@@ -110,7 +110,38 @@ assert_eq!(diagnostic.position().unwrap().offset, Some(4));
 The existing `JsonSerdeError::category()` and `position()` accessors retain
 their backend-specific return types. Use `FormatError::category(&error)` to
 include encoding and limit failures. Code matching `Serialize { message }` can
-now match `Serialize { category }`. The legacy extract accessors return `None`.
+now match `Serialize { category, .. }`. The legacy extract accessors return `None`.
+
+### Safe error detail
+
+With the `serde` feature, `JsonSerdeError::detail()` can identify a missing
+or duplicate field, an unknown field or variant, the kinds involved in a type
+mismatch, or a JSON grammar error. Every word comes from a fixed set of labels.
+Field and variant names, input values, custom error text and free-form type
+expectations are omitted. A custom decode error with recognized wording can
+select the same labels. Unrecognized or oversized messages yield `None`.
+`Display` and `Debug` preserve numeric position metadata. On Serde decode errors,
+the backend reports these coordinates, and custom errors can supply them.
+
+```rust
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Args { port: u16 }
+
+let error = rs_json::from_str::<Args>(r#"{"extra": 1}"#).unwrap_err();
+assert_eq!(error.detail(), Some("unknown field"));
+let error = rs_json::from_str::<Args>(r#"{"port": "demo"}"#).unwrap_err();
+assert_eq!(error.detail(), Some("invalid type: a string, expected u16"));
+let error = rs_json::from_str::<Args>("{}").unwrap_err();
+assert_eq!(error.detail(), Some("missing field"));
+```
+
+I/O and limit errors have no detail. In 0.5, `JsonSerdeError::Serialize` and
+`Deserialize` gained a `detail` field. Include `..` when matching only the
+existing fields, and use `detail: JsonSerdeDetail::NONE` when constructing
+an error without detail. The encoders (`to_vec`, `to_string`,
+`to_writer`, `to_value` and the pretty forms) now accept unsized values such
+as `&[T]` and `&str`.
 
 The [0.4 benchmark results](docs/BENCH.md#04-shared-limits-on-arbi-pc) compare the
 limited native slice parser with 0.3.0 on eight fixtures.

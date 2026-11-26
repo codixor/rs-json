@@ -1,4 +1,7 @@
 mod bounds;
+mod detail;
+
+pub use detail::{Detail, MAX_DETAIL_CHARS};
 
 use crate::{Category, FormatError, Limits, Pos, Position};
 use serde::de::DeserializeOwned;
@@ -15,23 +18,28 @@ pub type JsonSerdeResult<T> = Result<T, JsonSerdeError>;
 /// Workspace-owned JSON value type.
 pub type JsonValue = serde_json::Value;
 
-/// A Serde codec failure. Errors returned by this crate retain only a fixed
-/// encoding diagnostic or the decode category and source location.
+/// A Serde codec failure. Formatting preserves numeric position metadata.
+/// [`JsonSerdeError::detail`] can supply fixed diagnostic labels for recognized
+/// failures. See [`JsonSerdeError::position`] for the origin of coordinates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonSerdeError {
     /// Encoding failed.
     Serialize {
         /// I/O for a failed writer, or Data for a value that cannot be encoded.
         category: Category,
+        /// Fixed diagnostic for a recognized encoding failure.
+        detail: Detail,
     },
     /// Decoding failed.
     Deserialize {
         /// Decode category, including Data for a number outside the requested representation.
         category: JsonSerdeCategory,
-        /// Source line, starting at one. Zero indicates an unknown location.
+        /// Line reported by the codec. Zero indicates an unknown location.
         line: usize,
         /// Source column as reported by the codec. It can be zero at a line boundary.
         column: usize,
+        /// Fixed diagnostic labels for a recognized decoding failure.
+        detail: Detail,
     },
     /// Encoded input exceeded a configured parser bound.
     Limit {
@@ -48,23 +56,29 @@ impl JsonSerdeError {
             } else {
                 Category::Data
             },
+            detail: Detail::encode(error),
         }
     }
 
     fn decode(error: &serde_json::Error) -> Self {
-        // serde_json groups NumberOutOfRange with grammar errors and exposes
-        // only its formatted diagnostic. Custom Serde messages are already Data.
-        let category = if error.is_syntax()
-            && error.to_string().split(" at line ").next() == Some("number out of range")
-        {
-            JsonSerdeCategory::Data
-        } else {
-            error.classify()
-        };
+        let (category, detail) = Detail::decode(error);
         Self::Deserialize {
             category,
             line: error.line(),
             column: error.column(),
+            detail,
+        }
+    }
+
+    /// Diagnostic text assembled exclusively from fixed codec labels, such as
+    /// "missing field" or "invalid type: a string, expected u16". Field and
+    /// variant names, input values and free-form expectations are omitted.
+    /// A custom decode error with recognized wording can select these same
+    /// labels. Limit, I/O, and unrecognized or oversized messages yield `None`.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            Self::Serialize { detail, .. } | Self::Deserialize { detail, .. } => detail.as_str(),
+            Self::Limit { .. } => None,
         }
     }
 
@@ -76,7 +90,10 @@ impl JsonSerdeError {
         }
     }
 
-    /// The reported line and column when a decode failure has a source location.
+    /// The reported line and column, when available.
+    ///
+    /// For Serde decode failures, these numbers come from the backend. A custom
+    /// deserializer error can supply them. Limit errors use the parser's position.
     pub fn position(&self) -> Option<(usize, usize)> {
         match self {
             Self::Deserialize { line, column, .. } if *line != 0 => Some((*line, *column)),
@@ -89,7 +106,9 @@ impl JsonSerdeError {
 impl fmt::Display for JsonSerdeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Serialize { category } => write!(f, "failed to serialize JSON ({category:?})"),
+            Self::Serialize { category, .. } => {
+                write!(f, "failed to serialize JSON ({category:?})")
+            }
             Self::Limit { pos } => write!(
                 f,
                 "JSON limit exceeded at line {} column {} (byte {})",
@@ -111,7 +130,7 @@ impl std::error::Error for JsonSerdeError {}
 impl FormatError for JsonSerdeError {
     fn category(&self) -> Category {
         match self {
-            Self::Serialize { category } => *category,
+            Self::Serialize { category, .. } => *category,
             Self::Deserialize { category, .. } => match category {
                 JsonSerdeCategory::Io => Category::Io,
                 JsonSerdeCategory::Syntax => Category::Syntax,
@@ -156,7 +175,7 @@ fn decode_bounded<'de, T: Deserialize<'de>, R: serde_json::de::Read<'de>>(
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_vec<T: Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
+pub fn to_vec<T: ?Sized + Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
     serde_json::to_vec(value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -165,7 +184,7 @@ pub fn to_vec<T: Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_vec_pretty<T: Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
+pub fn to_vec_pretty<T: ?Sized + Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
     serde_json::to_vec_pretty(value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -174,7 +193,7 @@ pub fn to_vec_pretty<T: Serialize>(value: &T) -> JsonSerdeResult<Vec<u8>> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_string<T: Serialize>(value: &T) -> JsonSerdeResult<String> {
+pub fn to_string<T: ?Sized + Serialize>(value: &T) -> JsonSerdeResult<String> {
     serde_json::to_string(value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -183,7 +202,7 @@ pub fn to_string<T: Serialize>(value: &T) -> JsonSerdeResult<String> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_string_pretty<T: Serialize>(value: &T) -> JsonSerdeResult<String> {
+pub fn to_string_pretty<T: ?Sized + Serialize>(value: &T) -> JsonSerdeResult<String> {
     serde_json::to_string_pretty(value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -192,7 +211,7 @@ pub fn to_string_pretty<T: Serialize>(value: &T) -> JsonSerdeResult<String> {
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_writer<T: Serialize, W: Write>(writer: W, value: &T) -> JsonSerdeResult<()> {
+pub fn to_writer<T: ?Sized + Serialize, W: Write>(writer: W, value: &T) -> JsonSerdeResult<()> {
     serde_json::to_writer(writer, value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -201,7 +220,10 @@ pub fn to_writer<T: Serialize, W: Write>(writer: W, value: &T) -> JsonSerdeResul
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_writer_pretty<T: Serialize, W: Write>(writer: W, value: &T) -> JsonSerdeResult<()> {
+pub fn to_writer_pretty<T: ?Sized + Serialize, W: Write>(
+    writer: W,
+    value: &T,
+) -> JsonSerdeResult<()> {
     serde_json::to_writer_pretty(writer, value).map_err(|error| JsonSerdeError::encode(&error))
 }
 
@@ -210,7 +232,7 @@ pub fn to_writer_pretty<T: Serialize, W: Write>(writer: W, value: &T) -> JsonSer
 /// # Errors
 ///
 /// Returns [`JsonSerdeError`] when serialization fails.
-pub fn to_value<T: Serialize>(value: &T) -> JsonSerdeResult<JsonValue> {
+pub fn to_value<T: ?Sized + Serialize>(value: &T) -> JsonSerdeResult<JsonValue> {
     serde_json::to_value(value).map_err(|error| JsonSerdeError::encode(&error))
 }
 

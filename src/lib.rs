@@ -50,10 +50,10 @@ pub use crate::ld::{JsonLdArray, JsonLdDocument, JsonLdObject};
 #[cfg(feature = "serde")]
 #[doc(inline)]
 pub use crate::serde_codec::{
-    JsonSerdeCategory, JsonSerdeError, JsonSerdeResult, JsonValue, from_reader,
-    from_reader_with_limits, from_slice, from_slice_with_limits, from_str, from_str_with_limits,
-    from_value, to_string, to_string_pretty, to_value, to_vec, to_vec_pretty, to_writer,
-    to_writer_pretty,
+    Detail as JsonSerdeDetail, JsonSerdeCategory, JsonSerdeError, JsonSerdeResult, JsonValue,
+    from_reader, from_reader_with_limits, from_slice, from_slice_with_limits, from_str,
+    from_str_with_limits, from_value, to_string, to_string_pretty, to_value, to_vec, to_vec_pretty,
+    to_writer, to_writer_pretty,
 };
 
 pub use crate::dom::{Document, Parser, Value, ValueKind};
