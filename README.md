@@ -1,13 +1,13 @@
-# rs-json 0.4
+# rs-json 0.5
 
 The slice parser builds a flat tape with 16-byte nodes. `parse` accepts a string,
 `parse_bytes` accepts UTF-8 bytes, and `Parser::parse` reuses its buffers across
 documents. `PullParser` exposes the same grammar for byte slices and synchronous
-readers. Install with `cargo add rs-json@0.4` (Rust 1.100 or newer).
+readers. Install with `cargo add rs-json@0.5` (Rust 1.100 or newer).
 
 ### Shared parser limits
 
-Version 0.4 re-exports `rs_format::Limits` and adopts its inclusive defaults.
+Since version 0.4, the parser uses the inclusive defaults from `rs_format::Limits`.
 Use `parse_with_limits`, `parse_bytes_with_limits`, `Parser::limits` or the
 limits parameter on `PullParser`. With the `serde` feature, use
 `from_str_with_limits`, `from_slice_with_limits` or `from_reader_with_limits`.
