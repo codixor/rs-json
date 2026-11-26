@@ -115,23 +115,26 @@ now match `Serialize { category }`. The legacy extract accessors return `None`.
 ### Safe error detail
 
 `Display` and `Debug` never show input. For a message a person can act on,
-`JsonSerdeError::detail()` returns sanitized text: the field at fault, the
-expected type, and messages raised by the target type's own `Deserialize` or
-`Serialize` impl. Values taken from the input are reduced to their kind.
+`JsonSerdeError::detail()` returns text built only from what the target type
+declares and the codec's fixed messages: missing and duplicate field names,
+the expected type, the expected fields and variants, and grammar errors.
+Values, unknown keys and unknown variants from the input are never included,
+and neither is any `Error::custom` message, since a type's own impl can format
+the value it rejected. Those cases return `None`.
 
 ```rust
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Args { port: u16 }
 
-let error = rs_json::from_str::<Args>(r#"{"tokn": "hunter2"}"#).unwrap_err();
-assert_eq!(error.detail(), Some("unknown field `tokn`, expected `port`"));
+let error = rs_json::from_str::<Args>(r#"{"hunter2": 1}"#).unwrap_err();
+assert_eq!(error.detail(), Some("unknown field, expected `port`"));
 let error = rs_json::from_str::<Args>(r#"{"port": "hunter2"}"#).unwrap_err();
 assert_eq!(error.detail(), Some("invalid type: a string, expected u16"));
+let error = rs_json::from_str::<Args>("{}").unwrap_err();
+assert_eq!(error.detail(), Some("missing field `port`"));
 ```
 
-Field names are object keys from the input and are kept. A message from a
-third-party impl is only as safe as that impl; log `Display` when unsure.
 I/O and limit errors have no detail. `JsonSerdeError::Serialize` and
 `Deserialize` gained a `detail` field, so code that builds them needs
 `detail: JsonSerdeDetail::NONE`. The encoders (`to_vec`, `to_string`,

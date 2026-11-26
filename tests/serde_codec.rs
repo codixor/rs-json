@@ -153,6 +153,7 @@ fn assert_redacted(error: &JsonSerdeError) {
     assert!(!error.to_string().contains(FIXTURE));
     assert!(!format!("{error:?}").contains(FIXTURE));
     assert!(error.source().is_none());
+    assert!(!error.detail().unwrap_or_default().contains(FIXTURE));
 }
 
 #[test]
@@ -271,7 +272,7 @@ fn shared_diagnostics_expose_only_known_coordinates_and_categories() {
 }
 
 #[test]
-fn detail_names_the_field_but_never_the_value() {
+fn detail_never_quotes_the_input() {
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
     #[allow(dead_code)]
@@ -285,11 +286,11 @@ fn detail_names_the_field_but_never_the_value() {
         Read,
     }
 
-    let unknown = from_str::<Args>(&format!(r#"{{"tokn": "{FIXTURE}"}}"#)).unwrap_err();
+    let unknown = from_str::<Args>(&format!(r#"{{"{FIXTURE}": 1}}"#)).unwrap_err();
     assert_redacted(&unknown);
     assert_eq!(
         unknown.detail(),
-        Some("unknown field `tokn`, expected one of `token`, `port`, `mode`")
+        Some("unknown field, expected one of `token`, `port`, `mode`")
     );
 
     let missing = from_str::<Args>(r#"{"token": "t"}"#).unwrap_err();
@@ -319,34 +320,35 @@ fn detail_names_the_field_but_never_the_value() {
 }
 
 #[test]
-fn detail_keeps_messages_from_the_types_own_impls() {
+fn detail_drops_custom_messages() {
     #[derive(Debug)]
-    struct NoNull;
-    impl<'de> Deserialize<'de> for NoNull {
+    struct Token;
+    impl<'de> Deserialize<'de> for Token {
         fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-            Option::<u8>::deserialize(d)?
-                .map(|_| NoNull)
-                .ok_or_else(|| serde::de::Error::custom("a null drops a condition"))
+            let text = String::deserialize(d)?;
+            Err(serde::de::Error::custom(format!("bad token {text}")))
         }
     }
-    struct Guarded;
-    impl Serialize for Guarded {
+    struct Secret;
+    impl Serialize for Secret {
         fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom(
-                "a secret is never copied into a Value",
-            ))
+            Err(serde::ser::Error::custom(format!(
+                "cannot encode {FIXTURE}"
+            )))
         }
     }
-    let error = from_str::<NoNull>("null").unwrap_err();
-    assert_eq!(error.detail(), Some("a null drops a condition"));
-    assert!(!format!("{error:?}").contains("drops"));
+    let error = from_str::<Token>(&format!(r#""{FIXTURE}""#)).unwrap_err();
+    assert_redacted(&error);
+    assert_eq!(error.detail(), None);
 
-    let error = to_value(&Guarded).unwrap_err();
-    assert_eq!(
-        error.detail(),
-        Some("a secret is never copied into a Value")
-    );
+    let error = to_value(&Secret).unwrap_err();
+    assert_eq!(error.detail(), None);
     assert_eq!(error.to_string(), "failed to serialize JSON (Data)");
+
+    let mut map = std::collections::BTreeMap::new();
+    map.insert(vec![1u8], 1);
+    let error = to_string(&map).unwrap_err();
+    assert_eq!(error.detail(), Some("key must be a string"));
 }
 
 #[test]

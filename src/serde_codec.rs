@@ -19,16 +19,15 @@ pub type JsonSerdeResult<T> = Result<T, JsonSerdeError>;
 pub type JsonValue = serde_json::Value;
 
 /// A Serde codec failure. `Display` and `Debug` show only the category and
-/// source location. [`JsonSerdeError::detail`] adds sanitized text that never
-/// quotes an input value: field names, the expected type, and messages raised
-/// by the target type's own impls (see [`Detail`]).
+/// source location. [`JsonSerdeError::detail`] adds text built only from what
+/// the target type declares and the codec's fixed messages (see [`Detail`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonSerdeError {
     /// Encoding failed.
     Serialize {
         /// I/O for a failed writer, or Data for a value that cannot be encoded.
         category: Category,
-        /// Sanitized message from the value's `Serialize` impl or the codec.
+        /// The codec's fixed message, if any. Custom messages are dropped.
         detail: Detail,
     },
     /// Decoding failed.
@@ -79,11 +78,11 @@ impl JsonSerdeError {
         }
     }
 
-    /// Sanitized diagnostic text, for messages a person acts on: the field at
-    /// fault (``unknown field `tokn` ``), the expected type, or a message from
-    /// the target type's own `Deserialize`/`Serialize` impl. Values taken from
-    /// the input are reduced to their kind; see [`Detail`] for the rules.
-    /// Limit and I/O errors have none.
+    /// Diagnostic text a person can act on, built only from what the target
+    /// type declares (``missing field `port` ``, the expected type, the
+    /// expected fields) and the codec's fixed messages. Values, unknown keys
+    /// and `Error::custom` messages never appear; see [`Detail`] for the
+    /// rules. Limit, I/O and custom-message errors have none.
     pub fn detail(&self) -> Option<&str> {
         match self {
             Self::Serialize { detail, .. } | Self::Deserialize { detail, .. } => detail.as_str(),

@@ -1,27 +1,30 @@
 //! Safe diagnostic detail for typed codec errors.
 //!
-//! serde's default messages quote the rejected input (`invalid type: string
-//! "hunter2", expected u64`, ``unknown variant `sk_live_x` ``). This module
-//! keeps the useful part of a message and drops every value taken from the
-//! input:
+//! serde's default messages quote the input: rejected values
+//! (`invalid type: string "hunter2", expected u64`), unknown object keys
+//! (``unknown field `sk_live_x` ``) and unknown variants. A message from a
+//! type's own impl (`Error::custom`) can hold anything, including the value
+//! being decoded or encoded. Detail is therefore built from an allow-list:
+//! it keeps only text that the target type declares statically or that the
+//! codec writes as fixed text.
 //!
 //! | serde message | detail |
 //! |---------------|--------|
-//! | ``unknown field `k`, expected …`` | kept: the field name and the expected fields |
-//! | ``missing field `k` `` / ``duplicate field `k` `` | kept |
+//! | ``missing field `k` `` / ``duplicate field `k` `` | kept: `k` is a `&'static str` the type declares |
+//! | ``unknown field `k`, expected …`` | `unknown field, expected …`: the key came from the input |
 //! | `invalid type: string "…", expected …` | `invalid type: a string, expected …` |
 //! | ``invalid value: integer `5`, expected …`` | `invalid value: an integer, expected …` |
 //! | ``unknown variant `v`, expected …`` | `unknown variant, expected …` |
 //! | `invalid length 3, expected …` | kept: a count, not input |
-//! | `serde_json` grammar errors | kept: fixed text |
+//! | `data did not match any variant of untagged enum E` | kept: `E` is the type name |
+//! | `serde_json` grammar and number-range errors | kept: fixed text |
 //! | I/O errors | none: the reader's own text may hold anything |
-//! | any other message | kept: raised by the target type's own `Serialize`/`Deserialize` impl |
+//! | any other message, including every `Error::custom` | none |
 //!
-//! Field names are object keys from the input. They are kept because a
-//! message that cannot name the field at fault is not actionable. The last
-//! row is only as safe as the impls involved. Every detail drops the
-//! trailing `at line L column C`, replaces control characters with `?` and
-//! is cut at [`MAX_DETAIL_CHARS`] characters.
+//! The `expected …` part comes from the target type's `expecting`
+//! implementation. Every detail drops the trailing `at line L column C`,
+//! replaces control characters with `?` and is cut at [`MAX_DETAIL_CHARS`]
+//! characters.
 
 use core::fmt;
 
@@ -56,20 +59,29 @@ impl Detail {
     }
 
     pub(super) fn encode(is_io: bool, message: &str) -> Self {
-        if is_io {
-            Self::NONE
+        // `serde_json`'s own encode failures. Everything else is a custom
+        // message from a `Serialize` impl, which may quote the value.
+        const FIXED: [&str; 2] = [
+            "key must be a string",
+            "float key must be finite (got NaN or +/-inf)",
+        ];
+        let message = strip_position(message);
+        if !is_io && FIXED.contains(&message) {
+            Self::kept(message)
         } else {
-            Self::kept(strip_position(message))
+            Self::NONE
         }
     }
 
     fn data(message: &str) -> Self {
-        const KEEP: [&str; 5] = [
-            "unknown field `",
+        // Each prefix is followed only by text the target type declares.
+        const KEEP: [&str; 6] = [
             "missing field `",
             "duplicate field `",
             "invalid length ",
             "number out of range",
+            "data did not match any variant of untagged enum ",
+            "no variant of enum ",
         ];
         if KEEP.iter().any(|prefix| message.starts_with(prefix)) {
             return Self::kept(message);
@@ -87,13 +99,26 @@ impl Detail {
                 };
             }
         }
-        if message.starts_with("unknown variant `") {
-            return Self::kept(&match message.rsplit_once(", expected ") {
-                Some((_, expected)) => format!("unknown variant, expected {expected}"),
-                None => "unknown variant".to_owned(),
-            });
+        // The field or variant name came from the input. Keep only the
+        // expectation, which the type declares.
+        for (prefix, name, none) in [
+            ("unknown field `", "unknown field", ", there are no fields"),
+            (
+                "unknown variant `",
+                "unknown variant",
+                ", there are no variants",
+            ),
+        ] {
+            if message.starts_with(prefix) {
+                return Self::kept(&match message.rsplit_once(", expected ") {
+                    Some((_, expected)) => format!("{name}, expected {expected}"),
+                    None if message.ends_with(none) => format!("{name}{none}"),
+                    None => name.to_owned(),
+                });
+            }
         }
-        Self::kept(message)
+        // `Error::custom` from any impl: the text is not ours to vouch for.
+        Self::NONE
     }
 
     fn kept(text: &str) -> Self {
@@ -212,22 +237,61 @@ mod tests {
     }
 
     #[test]
-    fn field_names_custom_messages_and_grammar_are_kept() {
+    fn input_keys_and_custom_messages_are_dropped() {
         assert_eq!(
             d(
                 C::Data,
-                "unknown field `tokn`, expected `token` at line 1 column 7"
+                "unknown field `sk_live_x`, expected `token` at line 1 column 7"
             )
             .as_deref(),
-            Some("unknown field `tokn`, expected `token`")
+            Some("unknown field, expected `token`")
         );
+        // A key that itself contains the separator never survives.
+        assert_eq!(
+            d(
+                C::Data,
+                "unknown field `a, there are no fields`, expected one of `a`, `b`"
+            )
+            .as_deref(),
+            Some("unknown field, expected one of `a`, `b`")
+        );
+        assert_eq!(
+            d(C::Data, "unknown field `sk_live_x`, there are no fields").as_deref(),
+            Some("unknown field, there are no fields")
+        );
+        assert_eq!(
+            d(
+                C::Data,
+                "unknown variant `sk_live_x`, there are no variants"
+            )
+            .as_deref(),
+            Some("unknown variant, there are no variants")
+        );
+        assert_eq!(d(C::Data, "bad token sk_live_x"), None);
+        assert_eq!(
+            Detail::encode(false, "cannot encode sk_live_x").as_str(),
+            None
+        );
+        assert_eq!(
+            Detail::encode(false, "key must be a string").as_str(),
+            Some("key must be a string")
+        );
+        assert_eq!(Detail::encode(true, "key must be a string").as_str(), None);
+    }
+
+    #[test]
+    fn declared_names_and_grammar_are_kept() {
         assert_eq!(
             d(C::Data, "missing field `path`").as_deref(),
             Some("missing field `path`")
         );
         assert_eq!(
-            d(C::Data, "a null drops a condition").as_deref(),
-            Some("a null drops a condition")
+            d(
+                C::Data,
+                "data did not match any variant of untagged enum Rule"
+            )
+            .as_deref(),
+            Some("data did not match any variant of untagged enum Rule")
         );
         assert_eq!(
             d(C::Syntax, "expected `,` or `}` at line 1 column 4").as_deref(),
@@ -242,15 +306,15 @@ mod tests {
             d(C::Data, "missing field `a\nb`").as_deref(),
             Some("missing field `a?b`")
         );
-        let long = "x".repeat(1000);
+        let long = format!("missing field `{}`", "x".repeat(1000));
         assert_eq!(
             d(C::Data, &long).map(|s| s.chars().count()),
             Some(MAX_DETAIL_CHARS)
         );
         // A trailing phrase that is not a position stays.
         assert_eq!(
-            d(C::Data, "bad at line one").as_deref(),
-            Some("bad at line one")
+            d(C::Syntax, "expected value at line one").as_deref(),
+            Some("expected value at line one")
         );
         assert_eq!(
             format!("{:?}", Detail::decode(C::Data, "missing field `secret`")),
