@@ -1,11 +1,32 @@
-# rs-json 0.5
+# rs-json
 
-The slice parser builds a flat tape with 16-byte nodes. `parse` accepts a string,
-`parse_bytes` accepts UTF-8 bytes, and `Parser::parse` reuses its buffers across
-documents. `PullParser` exposes the same grammar for byte slices and synchronous
-readers. Install with `cargo add rs-json@0.5` (Rust 1.100 or newer).
+Parse JSON into a borrowed document, read a stream one event at a time, or
+decode into a Rust type with Serde. Version 0.5.0 requires Rust 1.100 or newer.
+[crates.io](https://crates.io/crates/rs-json/0.5.0) · [API reference](https://docs.rs/rs-json/0.5.0/rs_json/)
 
-### Shared parser limits
+## Quick start
+
+```sh
+cargo add rs-json@0.5.0
+```
+
+```rust
+use rs_json::parse;
+
+fn main() -> Result<(), rs_json::Error> {
+    let doc = parse(r#"{"service":"api","ports":[8080,8443]}"#)?;
+    let root = doc.root();
+    assert_eq!(root.get("service").unwrap().as_str().as_deref(), Some("api"));
+    let port = root.get("ports").and_then(|v| v.at(1)).and_then(|v| v.as_i64());
+    assert_eq!(port, Some(8443));
+    Ok(())
+}
+```
+
+Use `parse_bytes` for a UTF-8 byte slice and `Parser::parse` to reuse the
+parser's buffers across documents. Both expose the same 16-byte tape nodes.
+
+## Shared parser limits
 
 Since version 0.4, the parser uses the inclusive defaults from `rs_format::Limits`.
 Use `parse_with_limits`, `parse_bytes_with_limits`, `Parser::limits` or the
@@ -44,7 +65,7 @@ assert_eq!(error.kind, ErrorKind::DepthLimit);
 assert_eq!(error.offset(), 1);
 ```
 
-### Parsing a reader
+## Parsing a reader
 
 Enable the `read` feature to use `PullParser::from_reader` with a `std::io::Read`
 source. The parser borrows token bytes from its refill buffer and retains a
@@ -70,7 +91,7 @@ fn main() -> Result<(), rs_json::Error> {
 }
 ```
 
-### Optional APIs and migration
+## Optional APIs and migration
 
 | Feature | API |
 |---------|-----|
@@ -112,7 +133,14 @@ their backend-specific return types. Use `FormatError::category(&error)` to
 include encoding and limit failures. Code matching `Serialize { message }` can
 now match `Serialize { category, .. }`. The legacy extract accessors return `None`.
 
-### Safe error detail
+## Safe Serde error detail
+
+For the typed example below, enable the codec and Serde's derive macros.
+
+```sh
+cargo add rs-json@0.5.0 --features serde
+cargo add serde@1 --features derive
+```
 
 With the `serde` feature, `JsonSerdeError::detail()` can identify a missing
 or duplicate field, an unknown field or variant, the kinds involved in a type
@@ -143,7 +171,9 @@ an error without detail. The encoders (`to_vec`, `to_string`,
 `to_writer`, `to_value` and the pretty forms) now accept unsized values such
 as `&[T]` and `&str`.
 
-The [0.4 benchmark results](docs/BENCH.md#04-shared-limits-on-arbi-pc) compare the
+## Benchmarks
+
+The [0.4 benchmark results](https://github.com/codixor/rs-json/blob/v0.5.0/docs/BENCH.md#04-shared-limits-on-arbi-pc) compare the
 limited native slice parser with 0.3.0 on eight fixtures.
 
 The [0.2.0 benchmark report](https://github.com/codixor/rs-json/blob/v0.2.0/docs/BENCH.md)
